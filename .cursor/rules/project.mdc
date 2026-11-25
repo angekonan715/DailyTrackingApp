@@ -1,0 +1,25 @@
+---
+description: Daily Hub project rules
+alwaysApply: true
+---
+
+# Daily Hub
+
+Personal, mobile-first PWA for: daily to-dos, workouts (manual + Samsung Health CSV import), and books/reading progress. Used mainly on an Android phone.
+
+## Constraints
+- Must run at $0/month: Next.js on Vercel free tier, Supabase free tier.
+- No Strava. Samsung Health data comes ONLY from CSV upload (no web API exists).
+- Optional AI (Phase 6) must stay under $5/month with a hard cap.
+
+## Stack & conventions
+- Next.js App Router + TypeScript + Tailwind v4. This Next.js version may differ from your training data: check `node_modules/next/dist/docs/` before using an API.
+- Supabase via `@/lib/supabase/client` (client components) and `@/lib/supabase/server` (server).
+- Schema lives in `supabase/migrations/`; shared types in `types/index.ts`. Keep them in sync.
+- Every table has RLS with `auth.uid() = user_id`.
+- Folders: `/app` routes, `/components` UI, `/lib` logic, `/types` types.
+- Mobile-first: large tap targets, bottom tab bar (Today, Workouts, Books, Summary), light/dark via CSS variables in `app/globals.css`.
+- Always handle loading, empty and error states.
+
+## Build plan
+Follow `docs/CURSOR_PROMPT.md` one phase at a time; stop after each phase for testing.
