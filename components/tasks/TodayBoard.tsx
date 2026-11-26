@@ -7,6 +7,7 @@ import EmptyState from "@/components/EmptyState";
 import SetupNotice from "@/components/SetupNotice";
 import SignOutButton from "@/components/auth/SignOutButton";
 import TaskList, { type TaskDraft } from "@/components/tasks/TaskList";
+import GoalBoard from "@/components/goals/GoalBoard";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { addDays, formatLongDate, parseDayKey, relativeDayLabel, toDayKey } from "@/lib/dates";
@@ -48,6 +49,8 @@ function TaskScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [carrying, setCarrying] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [todoOnly, setTodoOnly] = useState(true);
   const savedPositions = useRef(new Map<string, number>());
   const touch = useRef<{ x: number; y: number } | null>(null);
   const remember = useCallback((list: Task[]) => {
@@ -339,6 +342,33 @@ function TaskScreen() {
         </button>
       ) : null}
 
+      <div className="mb-4 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setNotice(null);
+            setError(null);
+            setPicked("");
+            setTodoOnly(true);
+            setAdding(false);
+          }}
+          className={`min-h-12 rounded-xl text-sm font-semibold ${
+            viewingToday && todoOnly ? "bg-accent text-white dark:text-neutral-950" : "bg-card"
+          }`}
+        >
+          Today only
+        </button>
+        <button
+          type="button"
+          onClick={() => setAdding((open) => !open)}
+          className="min-h-12 rounded-xl bg-accent text-sm font-semibold text-white dark:text-neutral-950"
+        >
+          {adding ? "Close" : "Add a task"}
+        </button>
+      </div>
+
+      <GoalBoard metrics={["tasks"]} />
+
       {notice ? (
         <p role="status" className="mb-4 text-sm text-muted">
           {notice}
@@ -353,31 +383,34 @@ function TaskScreen() {
         </div>
       ) : null}
 
-      <AddTaskForm
-        disabled={!ready}
-        onAdd={async (draft) => {
-          if (!activeDate) return;
-          const position = tasks.reduce((max, task) => Math.max(max, task.position), -1) + 1;
-          const { data, error: insertError } = await createClient()
-            .from("tasks")
-            .insert({
-              title: draft.title,
-              note: draft.note,
-              priority: draft.priority,
-              task_date: activeDate,
-              position,
-            })
-            .select("id, user_id, title, note, priority, task_date, done, position, created_at")
-            .single();
-          if (insertError) throw new Error(friendlyError(insertError.message));
-          const created = data as Task;
-          setTasks((current) => {
-            const next = sortTasks([...current, created]);
-            remember(next);
-            return next;
-          });
-        }}
-      />
+      {adding ? (
+        <AddTaskForm
+          disabled={!ready}
+          onAdd={async (draft) => {
+            if (!activeDate) return;
+            const position = tasks.reduce((max, task) => Math.max(max, task.position), -1) + 1;
+            const { data, error: insertError } = await createClient()
+              .from("tasks")
+              .insert({
+                title: draft.title,
+                note: draft.note,
+                priority: draft.priority,
+                task_date: activeDate,
+                position,
+              })
+              .select("id, user_id, title, note, priority, task_date, done, position, created_at")
+              .single();
+            if (insertError) throw new Error(friendlyError(insertError.message));
+            const created = data as Task;
+            setTasks((current) => {
+              const next = sortTasks([...current, created]);
+              remember(next);
+              return next;
+            });
+            setAdding(false);
+          }}
+        />
+      ) : null}
 
       {!ready ? (
         <div className="space-y-2" aria-live="polite">
@@ -389,22 +422,27 @@ function TaskScreen() {
       {ready && tasks.length === 0 ? (
         <EmptyState
           title="No tasks for this day"
-          hint={
-            viewingToday
-              ? "Add one above, or carry over anything you didn't finish yesterday."
-              : "Add a task above to plan this day."
-          }
+          hint={viewingToday ? "Add a task, or carry over anything left from yesterday." : "Add a task to plan this day."}
         />
       ) : null}
-      {ready && tasks.length > 0 ? (
+      {ready && tasks.length > 0 && todoOnly && tasks.every((task) => task.done) ? (
+        <EmptyState title="Today is clear" hint="Every task for today is done." />
+      ) : null}
+      {ready && tasks.some((task) => (todoOnly ? !task.done : true)) ? (
         <TaskList
           tasks={tasks}
+          hideDone={todoOnly}
           onToggle={toggle}
           onDelete={remove}
           onSave={save}
           onPreview={setTasks}
           onCommit={(next) => void commitOrder(next)}
         />
+      ) : null}
+      {ready && todoOnly && tasks.some((task) => task.done) ? (
+        <button type="button" onClick={() => setTodoOnly(false)} className="mt-3 min-h-11 text-sm font-medium text-accent">
+          Show finished
+        </button>
       ) : null}
     </>
   );

@@ -1,5 +1,5 @@
 // Minimal service worker: makes Daily Hub installable and caches the app shell.
-const CACHE = "daily-hub-v1";
+const CACHE = "daily-hub-v2";
 const SHELL = ["/today", "/workouts", "/books", "/summary"];
 
 self.addEventListener("install", (event) => {

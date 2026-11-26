@@ -24,6 +24,7 @@ type Draft = {
 
 export default function TaskList({
   tasks,
+  hideDone = false,
   onToggle,
   onDelete,
   onSave,
@@ -31,6 +32,7 @@ export default function TaskList({
   onCommit,
 }: {
   tasks: Task[];
+  hideDone?: boolean;
   onToggle: (task: Task) => void;
   onDelete: (task: Task) => void;
   onSave: (task: Task, draft: Draft) => Promise<void>;
@@ -54,7 +56,7 @@ export default function TaskList({
           onCommit={onCommit}
         />
       ) : null}
-      {done.length > 0 ? (
+      {done.length > 0 && !hideDone ? (
         <Group
           label="Done"
           tasks={done}

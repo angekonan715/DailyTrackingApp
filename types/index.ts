@@ -72,3 +72,12 @@ export interface AiUsage {
   month: string; // YYYY-MM
   cost_cents: number;
 }
+
+export type GoalMetric = "tasks" | "workout_minutes" | "workouts" | "pages" | "steps";
+
+export interface Goal {
+  user_id: string;
+  metric: GoalMetric;
+  weekly_target: number | null;
+  monthly_target: number | null;
+}

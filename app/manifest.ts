@@ -7,6 +7,7 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "To-dos, workouts and reading in one place.",
     start_url: "/today",
     display: "standalone",
+    id: "/",
     background_color: "#ffffff",
     theme_color: "#2563eb",
     icons: [

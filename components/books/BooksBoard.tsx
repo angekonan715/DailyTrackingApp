@@ -6,6 +6,7 @@ import PageHeader from "@/components/PageHeader";
 import EmptyState from "@/components/EmptyState";
 import SetupNotice from "@/components/SetupNotice";
 import { createClient } from "@/lib/supabase/client";
+import GoalBoard from "@/components/goals/GoalBoard";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { formatLongDate, parseDayKey, toDayKey } from "@/lib/dates";
 import {
@@ -329,6 +330,7 @@ function BooksScreen() {
   return (
     <>
       <PageHeader title="Books" subtitle={`${yearFinished.length} finished this year`} />
+      <GoalBoard metrics={["pages"]} />
 
       {adding ? (
         <BookForm

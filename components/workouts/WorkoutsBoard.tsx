@@ -7,6 +7,7 @@ import PageHeader from "@/components/PageHeader";
 import EmptyState from "@/components/EmptyState";
 import SetupNotice from "@/components/SetupNotice";
 import WorkoutForm, { type WorkoutDraft } from "@/components/workouts/WorkoutForm";
+import GoalBoard from "@/components/goals/GoalBoard";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { addDays, relativeDayLabel, startOfWeek, toDayKey } from "@/lib/dates";
@@ -186,6 +187,8 @@ function WorkoutScreen() {
           </Link>
         }
       />
+
+      <GoalBoard metrics={["workout_minutes", "workouts"]} />
 
       {formMode ? (
         <WorkoutForm
