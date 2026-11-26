@@ -22,11 +22,7 @@ export default function FloatingCoach() {
       className="fixed right-4 z-40 flex w-[min(22rem,calc(100vw-2rem))] flex-col items-end gap-3"
       style={{ bottom: `calc(${lift} + env(safe-area-inset-bottom))` }}
     >
-      {open ? (
-        <div className="max-h-[min(28rem,70vh)] w-full overflow-y-auto rounded-2xl shadow-lg">
-          <CoachChat today={today} />
-        </div>
-      ) : null}
+      {open ? <CoachChat today={today} /> : null}
       <button
         type="button"
         aria-expanded={open}
