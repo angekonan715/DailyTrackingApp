@@ -84,7 +84,7 @@ create trigger lock_member_identity
 grant select, insert, update, delete on public.households to authenticated;
 grant select, insert, update, delete on public.household_members to authenticated;
 
-create or replace function public.add_family_member(member_email text, member_name text)
+create or replace function public.add_family_member(member_email text, member_name text, member_password text)
 returns jsonb
 language plpgsql
 security definer
@@ -115,13 +115,44 @@ begin
   if length(clean_name) > 40 then
     clean_name := left(clean_name, 40);
   end if;
+  if member_password is null or length(member_password) < 6 then
+    raise exception 'Use at least 6 characters for their password.';
+  end if;
+  if length(member_password) > 72 then
+    raise exception 'Use 72 characters or fewer for their password.';
+  end if;
 
   select id into found from auth.users where lower(email) = clean_email limit 1;
-  if found is null then
-    raise exception 'No account uses that email yet. Ask them to open Daily Hub, tap Create an account, then add them again.';
-  end if;
   if found = me then
     raise exception 'That is your own email.';
+  end if;
+
+  if found is null then
+    found := gen_random_uuid();
+    insert into auth.users (
+      instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+      raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+      confirmation_token, recovery_token, email_change_token_new, email_change, email_change_token_current
+    ) values (
+      '00000000-0000-0000-0000-000000000000', found, 'authenticated', 'authenticated', clean_email,
+      extensions.crypt(member_password, extensions.gen_salt('bf')), now(),
+      '{"provider":"email","providers":["email"]}'::jsonb,
+      jsonb_build_object('display_name', clean_name), now(), now(),
+      '', '', '', '', ''
+    );
+    insert into auth.identities (
+      id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at
+    ) values (
+      gen_random_uuid(), found, found::text,
+      jsonb_build_object('sub', found::text, 'email', clean_email, 'email_verified', true),
+      'email', now(), now(), now()
+    );
+  else
+    update auth.users
+      set encrypted_password = extensions.crypt(member_password, extensions.gen_salt('bf')),
+          email_confirmed_at = coalesce(email_confirmed_at, now()),
+          updated_at = now()
+      where id = found;
   end if;
 
   select household_id into house from public.household_members where user_id = me;
@@ -160,8 +191,8 @@ begin
 end;
 $$;
 
-revoke all on function public.add_family_member(text, text) from public;
-grant execute on function public.add_family_member(text, text) to authenticated;
+revoke all on function public.add_family_member(text, text, text) from public;
+grant execute on function public.add_family_member(text, text, text) to authenticated;
 
 create or replace function public.household_summary(target uuid, today date, tz text)
 returns jsonb

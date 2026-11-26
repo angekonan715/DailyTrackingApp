@@ -44,9 +44,9 @@ export default function LoginForm() {
   const linkError = useSyncExternalStore(subscribe, readLinkError, () => null);
   const remembered = useSyncExternalStore(subscribe, readEmail, () => "");
   const [email, setEmail] = useState<string | null>(null);
-  const [name, setName] = useState("");
   const [password, setPassword] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [confirm, setConfirm] = useState("");
+  const [setting, setSetting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const error = formError ?? linkError;
@@ -76,32 +76,24 @@ export default function LoginForm() {
       setFormError("Use at least 6 characters.");
       return;
     }
+    if (setting && password !== confirm) {
+      setFormError("Type the same password in both boxes.");
+      return;
+    }
 
     setSaving(true);
     setFormError(null);
     const supabase = createClient();
-    if (creating) {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email: trimmed,
-        password,
-        options: { data: { display_name: name.trim() } },
+    if (setting) {
+      const { error: claimError } = await supabase.rpc("claim_family_invite", {
+        member_email: trimmed,
+        member_password: password,
       });
-      setSaving(false);
-      if (signUpError) {
-        setFormError(friendlyPasswordError(signUpError.message));
+      if (claimError) {
+        setSaving(false);
+        setFormError(claimError.message);
         return;
       }
-      remember(trimmed);
-      if (!data.session) {
-        setFormError(
-          "Account created. Supabase is still waiting to confirm the email. In the Supabase dashboard, open Authentication, then Sign In / Providers, then Email, and turn off Confirm email. Then sign in with this email and password.",
-        );
-        setCreating(false);
-        return;
-      }
-      router.push("/today");
-      router.refresh();
-      return;
     }
 
     const { error: signInError } = await supabase.auth.signInWithPassword({
@@ -122,25 +114,9 @@ export default function LoginForm() {
     <>
       <PageHeader
         title="Daily Hub"
-        subtitle={creating ? "Create your own account." : "Sign in with your email and password."}
+        subtitle={setting ? "Choose your own password." : "Sign in with your email and password."}
       />
       <form onSubmit={signIn} className="space-y-3 rounded-2xl bg-card p-4">
-        {creating ? (
-          <div>
-            <label htmlFor="name" className="mb-1 block text-sm font-medium">
-              Name
-            </label>
-            <input
-              id="name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              autoComplete="name"
-              maxLength={40}
-              placeholder="Ada"
-              className="w-full min-h-12 rounded-xl bg-background px-4 text-base outline-none focus:ring-2 focus:ring-accent"
-            />
-          </div>
-        ) : null}
         <div>
           <label htmlFor="email" className="mb-1 block text-sm font-medium">
             Email
@@ -162,31 +138,50 @@ export default function LoginForm() {
           <input
             id="password"
             type="password"
-            autoComplete={creating ? "new-password" : "current-password"}
+            autoComplete={setting ? "new-password" : "current-password"}
             required
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             className="w-full min-h-12 rounded-xl bg-background px-4 text-base outline-none focus:ring-2 focus:ring-accent"
           />
         </div>
+        {setting ? (
+          <div>
+            <label htmlFor="confirm" className="mb-1 block text-sm font-medium">
+              Password again
+            </label>
+            <input
+              id="confirm"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={confirm}
+              onChange={(event) => setConfirm(event.target.value)}
+              className="w-full min-h-12 rounded-xl bg-background px-4 text-base outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+        ) : null}
         <button
           type="submit"
           disabled={saving}
           className="w-full min-h-12 rounded-xl bg-accent text-base font-semibold text-white disabled:opacity-60 dark:text-neutral-950"
         >
-          {saving ? "Please wait…" : creating ? "Create account" : "Sign in"}
+          {saving ? "Please wait…" : setting ? "Save password" : "Sign in"}
         </button>
       </form>
 
       <button
         type="button"
         onClick={() => {
-          setCreating((open) => !open);
+          setSetting((open) => !open);
           setFormError(null);
+          setPassword("");
+          setConfirm("");
+          setEmail(setting ? null : "");
         }}
         className="mt-4 min-h-12 w-full text-sm font-medium text-accent"
       >
-        {creating ? "I already have an account" : "Create an account"}
+        {setting ? "I already have a password" : "Set your password"}
       </button>
 
       {error ? (

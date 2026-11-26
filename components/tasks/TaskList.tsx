@@ -32,6 +32,7 @@ type Draft = {
 export default function TaskList({
   tasks,
   hideDone = false,
+  carriedIds = [],
   onToggle,
   onDelete,
   onSave,
@@ -40,6 +41,7 @@ export default function TaskList({
 }: {
   tasks: Task[];
   hideDone?: boolean;
+  carriedIds?: readonly string[];
   onToggle: (task: Task) => void;
   onDelete: (task: Task) => void;
   onSave: (task: Task, draft: Draft) => Promise<void>;
@@ -56,6 +58,7 @@ export default function TaskList({
           label={done.length > 0 ? "To do" : ""}
           tasks={open}
           allTasks={tasks}
+          carriedIds={carriedIds}
           onToggle={onToggle}
           onDelete={onDelete}
           onSave={onSave}
@@ -68,6 +71,7 @@ export default function TaskList({
           label="Done"
           tasks={done}
           allTasks={tasks}
+          carriedIds={carriedIds}
           onToggle={onToggle}
           onDelete={onDelete}
           onSave={onSave}
@@ -83,6 +87,7 @@ function Group({
   label,
   tasks,
   allTasks,
+  carriedIds = [],
   onToggle,
   onDelete,
   onSave,
@@ -92,6 +97,7 @@ function Group({
   label: string;
   tasks: Task[];
   allTasks: Task[];
+  carriedIds?: readonly string[];
   onToggle: (task: Task) => void;
   onDelete: (task: Task) => void;
   onSave: (task: Task, draft: Draft) => Promise<void>;
@@ -164,6 +170,7 @@ function Group({
             task={task}
             lifted={activeId === task.id ? lift : 0}
             active={activeId === task.id}
+            carried={carriedIds.includes(task.id)}
             onToggle={onToggle}
             onDelete={onDelete}
             onSave={onSave}
@@ -181,6 +188,7 @@ function TaskRow({
   task,
   lifted,
   active,
+  carried,
   onToggle,
   onDelete,
   onSave,
@@ -191,6 +199,7 @@ function TaskRow({
   task: Task;
   lifted: number;
   active: boolean;
+  carried: boolean;
   onToggle: (task: Task) => void;
   onDelete: (task: Task) => void;
   onSave: (task: Task, draft: Draft) => Promise<void>;
@@ -319,9 +328,12 @@ function TaskRow({
           </button>
 
           <div className="min-w-0 flex-1 py-3 pr-1">
-            <p className={`font-medium break-words ${task.done ? "text-muted line-through" : ""}`}>
-              {task.title}
-            </p>
+            <p className={`font-medium break-words ${task.done ? "text-muted line-through" : ""}`}>{task.title}</p>
+            {carried ? (
+              <p className="mt-1">
+                <span className="rounded-full bg-background px-2 py-0.5 text-xs font-medium text-muted">Carried over</span>
+              </p>
+            ) : null}
             {task.note ? (
               <p className="mt-1 text-sm text-muted break-words">{task.note}</p>
             ) : null}

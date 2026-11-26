@@ -12,6 +12,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { addDays, formatLongDate, parseDayKey, relativeDayLabel, toDayKey } from "@/lib/dates";
 import { sortTasks } from "@/lib/tasks";
 import { workoutFromTask } from "@/lib/task-workout";
+import { carriedOnServer, readCarried, rememberCarried, subscribeCarried } from "@/lib/carried";
 
 function subscribe() {
   return () => {};
@@ -285,6 +286,7 @@ function TaskScreen() {
         ? "Moved 1 unfinished task from yesterday."
         : `Moved ${unfinished.length} unfinished tasks from yesterday.`,
     );
+    rememberCarried(unfinished.map((task) => task.id));
     await reload();
     setCarrying(false);
   }
@@ -348,6 +350,19 @@ function TaskScreen() {
     setAdding(false);
   }
 
+  const carriedIds = useSyncExternalStore(subscribeCarried, readCarried, carriedOnServer);
+
+  useEffect(() => {
+    if (!ready || !viewingToday || !("setAppBadge" in navigator)) return;
+    const left = tasks.filter((task) => !task.done).length;
+    const nav = navigator as Navigator & {
+      setAppBadge?: (count?: number) => Promise<void>;
+      clearAppBadge?: () => Promise<void>;
+    };
+    const pending = left > 0 ? nav.setAppBadge?.(left) : nav.clearAppBadge?.();
+    void pending?.catch(() => undefined);
+  }, [ready, viewingToday, tasks]);
+
   const focusToday = viewingToday && todoOnly;
   const list = (
     <>
@@ -366,6 +381,7 @@ function TaskScreen() {
         <TaskList
           tasks={tasks}
           hideDone={todoOnly}
+          carriedIds={carriedIds}
           onToggle={toggle}
           onDelete={remove}
           onSave={save}
@@ -387,8 +403,11 @@ function TaskScreen() {
   if (focusToday) {
     return (
       <>
-        <header className="mb-5 flex items-center justify-between gap-3">
-          <h1 className="text-2xl font-bold">Today</h1>
+        <header className="mb-5 flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold">Today</h1>
+            <p className="mt-0.5 text-sm text-muted">{todayKey ? formatLongDate(todayKey) : "Loading date…"}</p>
+          </div>
           <div className="flex items-center gap-1">
             <button
               type="button"

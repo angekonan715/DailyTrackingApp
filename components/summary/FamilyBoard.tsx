@@ -52,7 +52,7 @@ function subscribeOpen(onChange: () => void) {
 
 function friendlyError(message: string): string {
   if (/household|schema cache|does not exist|function/i.test(message)) {
-    return "Family sharing is not set up yet. In Supabase, open the SQL Editor, paste supabase/migrations/0007_household.sql, and run it.";
+    return "Adding someone needs one more script in Supabase. Paste the latest family script, run it, and reload.";
   }
   if (/jwt|not authenticated|invalid claim/i.test(message)) return "Your session expired. Sign in again.";
   return message;
@@ -107,6 +107,7 @@ function displayName(user: { email?: string | null; user_metadata?: Record<strin
 export default function FamilyBoard({ todayKey }: { todayKey: string }) {
   const [me, setMe] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  const [invites, setInvites] = useState<{ email: string; display_name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -122,6 +123,7 @@ export default function FamilyBoard({ todayKey }: { todayKey: string }) {
         if (cancelled) return;
         setMe(people.me);
         setMembers(people.members);
+        setInvites(people.invites);
         setOpenIds(readOpen());
         setError(null);
       } catch (loadError) {
@@ -173,6 +175,7 @@ export default function FamilyBoard({ todayKey }: { todayKey: string }) {
     const people = await loadFamily();
     setMe(people.me);
     setMembers(people.members);
+    setInvites(people.invites);
   }
 
   async function setSharing(share: boolean) {
@@ -216,10 +219,17 @@ export default function FamilyBoard({ todayKey }: { todayKey: string }) {
           {mine.share_summary ? "My summary is shared" : "Share my summary"}
         </button>
       ) : null}
-      {others.length === 0 && !loading ? (
+      {others.length === 0 && invites.length === 0 && !loading ? (
         <p className="mt-3 text-sm text-muted">No one else is in your family yet.</p>
       ) : (
         <ul className="mt-3 space-y-3">
+          {invites.map((invite) => (
+            <li key={invite.email} className="rounded-xl bg-background p-3">
+              <p className="font-medium break-words">{invite.display_name}</p>
+              <p className="text-sm text-muted break-all">{invite.email}</p>
+              <p className="mt-1 text-sm text-muted">Waiting for them to set a password.</p>
+            </li>
+          ))}
           {others.map((member) => {
             const open = openIds.includes(member.user_id);
             const card = summaries[member.user_id];
@@ -346,7 +356,7 @@ function AddPerson({ onAdded }: { onAdded: () => Promise<void> }) {
   return (
     <form onSubmit={submit} className="mt-3 space-y-3">
       <p className="text-sm text-muted">
-        They create an account on the sign-in page with the email they gave you. Then add that email here.
+        Add the email they gave you. They open the app, tap Set your password, and choose it themselves.
       </p>
       <input
         value={name}
@@ -377,7 +387,7 @@ function AddPerson({ onAdded }: { onAdded: () => Promise<void> }) {
   );
 }
 
-async function loadFamily(): Promise<{ me: string; members: Member[] }> {
+async function loadFamily(): Promise<{ me: string; members: Member[]; invites: { email: string; display_name: string }[] }> {
   const supabase = createClient();
   const {
     data: { user },
@@ -409,5 +419,14 @@ async function loadFamily(): Promise<{ me: string; members: Member[] }> {
 
   const people = await supabase.from("household_members").select(columns).eq("household_id", mine.household_id);
   if (people.error) throw new Error(people.error.message);
-  return { me: user.id, members: (people.data ?? []) as Member[] };
+  const invites = await supabase
+    .from("household_invites")
+    .select("email, display_name")
+    .eq("household_id", mine.household_id);
+  if (invites.error) throw new Error(invites.error.message);
+  return {
+    me: user.id,
+    members: (people.data ?? []) as Member[],
+    invites: (invites.data ?? []) as { email: string; display_name: string }[],
+  };
 }
