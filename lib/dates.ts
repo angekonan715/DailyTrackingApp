@@ -22,3 +22,28 @@ export function addDays(d: Date, n: number): Date {
   copy.setDate(copy.getDate() + n);
   return copy;
 }
+
+/** Parse a YYYY-MM-DD key as a local calendar date. */
+export function parseDayKey(key: string): Date {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, (month ?? 1) - 1, day ?? 1);
+}
+
+export function relativeDayLabel(key: string, today = toDayKey()): string {
+  if (key === today) return "Today";
+  if (key === toDayKey(addDays(parseDayKey(today), -1))) return "Yesterday";
+  if (key === toDayKey(addDays(parseDayKey(today), 1))) return "Tomorrow";
+  return parseDayKey(key).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export function formatLongDate(key: string): string {
+  return parseDayKey(key).toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+}

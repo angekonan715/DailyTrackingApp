@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import BottomNav from "@/components/BottomNav";
+import AppShell from "@/components/AppShell";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 
 export const metadata: Metadata = {
@@ -23,10 +23,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
-        <main className="flex-1 w-full max-w-xl mx-auto px-4 pt-6 pb-28">
-          {children}
-        </main>
-        <BottomNav />
+        <AppShell>{children}</AppShell>
         <ServiceWorkerRegister />
       </body>
     </html>
