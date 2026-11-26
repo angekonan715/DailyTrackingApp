@@ -28,6 +28,18 @@ function redirectKeepingCookies(from: NextResponse, url: URL): NextResponse {
 export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Supabase sometimes returns the email link to the site root or /login.
+  // The code is only exchanged on /auth/callback, so send it there intact.
+  const params = request.nextUrl.searchParams;
+  if (
+    !pathname.startsWith("/auth") &&
+    (params.has("code") || params.has("token_hash"))
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/callback";
+    return NextResponse.redirect(url);
+  }
+
   // The email link lands here with a one-time code. Don't refresh the session
   // on this request or the code-verifier cookie can be overwritten.
   if (isAuthCallback(pathname) || isPublicAsset(pathname)) {
