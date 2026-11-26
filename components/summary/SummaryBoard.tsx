@@ -5,6 +5,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import type { Book, DailySteps, ReadingSession, Task, Workout } from "@/types";
 import PageHeader from "@/components/PageHeader";
 import SetupNotice from "@/components/SetupNotice";
+import CoachChat from "@/components/summary/CoachChat";
+import DailyQuote from "@/components/summary/DailyQuote";
 import WeeklyInsight from "@/components/summary/WeeklyInsight";
 import FamilyBoard from "@/components/summary/FamilyBoard";
 import GoalBoard from "@/components/goals/GoalBoard";
@@ -150,6 +152,13 @@ function SummaryScreen() {
       <PageHeader title="Summary" subtitle="Today, this week, and this month against your goals" />
       <GoalBoard metrics={ALL_GOAL_METRICS} charts />
       {todayKey ? <FamilyBoard todayKey={todayKey} /> : null}
+      {todayKey ? (
+        <div className="mb-3 space-y-3">
+          <DailyQuote today={todayKey} />
+          <WeeklyInsight today={todayKey} />
+          <CoachChat today={todayKey} />
+        </div>
+      ) : null}
       {error ? (
         <p role="alert" className="mb-4 rounded-2xl bg-card px-4 py-3 text-sm text-red-600 dark:text-red-400">
           {error}
@@ -245,7 +254,6 @@ function SummaryScreen() {
             />
           </section>
 
-          {todayKey ? <WeeklyInsight today={todayKey} /> : null}
         </div>
       ) : null}
     </>

@@ -12,6 +12,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { addDays, formatLongDate, parseDayKey, relativeDayLabel, toDayKey } from "@/lib/dates";
 import { sortTasks } from "@/lib/tasks";
 import { workoutFromTask } from "@/lib/task-workout";
+import DailyQuote from "@/components/summary/DailyQuote";
 import QuickWorkout from "@/components/workouts/QuickWorkout";
 import { carriedOnServer, readCarried, rememberCarried, subscribeCarried } from "@/lib/carried";
 
@@ -420,6 +421,7 @@ function TaskScreen() {
             <SignOutButton />
           </div>
         </header>
+        {todayKey ? <DailyQuote today={todayKey} quiet className="mb-4" /> : null}
         {error ? (
           <div role="alert" className="mb-4 rounded-2xl bg-card px-4 py-3 text-sm">
             <p className="text-red-600 dark:text-red-400">{error}</p>
@@ -501,6 +503,8 @@ function TaskScreen() {
           <div className="h-full bg-accent transition-[width]" style={{ width: `${percent}%` }} />
         </div>
       </div>
+
+      {viewingToday && todayKey ? <DailyQuote today={todayKey} quiet className="mb-4" /> : null}
 
       {viewingToday ? (
         <button

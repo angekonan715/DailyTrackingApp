@@ -5,6 +5,8 @@ import type { Goal, GoalMetric } from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import { addDays, parseDayKey, toDayKey } from "@/lib/dates";
 import {
+  bookGoalSentence,
+  bookTargets,
   dailyShare,
   formatAmount,
   inDayRange,
@@ -12,6 +14,7 @@ import {
   monthBounds,
   paceLabel,
   weekBounds,
+  yearBounds,
   type PeriodCounts,
 } from "@/lib/goals";
 
@@ -23,6 +26,9 @@ function subscribe() {
 }
 
 function friendlyError(message: string): string {
+  if (/yearly_target|books|goals_metric|check constraint/i.test(message)) {
+    return "Book goals need one more script. Paste the book goals script into the Supabase SQL editor and run it.";
+  }
   if (/relation|schema cache|does not exist|permission denied/i.test(message)) {
     return "Goals are not set up yet. In Supabase, open the SQL Editor, paste supabase/migrations/0005_goals.sql, and run it.";
   }
@@ -36,10 +42,12 @@ async function loadGoals(metrics: GoalMetric[], today: string): Promise<{
 }> {
   const month = monthBounds(today);
   const week = weekBounds(today);
-  const rangeStart = week.start < month.start ? week.start : month.start;
+  const year = yearBounds(today);
+  const rangeStart = [week.start, month.start, year.start].sort()[0];
+  const rangeEnd = [week.end, month.end, year.end].sort().at(-1) ?? year.end;
   const supabase = createClient();
-  const [goalsResult, tasksResult, workoutsResult, stepsResult, sessionsResult] = await Promise.all([
-    supabase.from("goals").select("user_id, metric, weekly_target, monthly_target").in("metric", metrics),
+  const [goalsResult, tasksResult, workoutsResult, stepsResult, booksResult] = await Promise.all([
+    supabase.from("goals").select("user_id, metric, weekly_target, monthly_target, yearly_target").in("metric", metrics),
     metrics.includes("tasks")
       ? supabase
           .from("tasks")
@@ -58,20 +66,21 @@ async function loadGoals(metrics: GoalMetric[], today: string): Promise<{
     metrics.includes("steps")
       ? supabase.from("daily_steps").select("day, steps").gte("day", rangeStart).lt("day", month.end)
       : Promise.resolve({ data: [], error: null }),
-    metrics.includes("pages")
-      ? supabase.from("reading_sessions").select("day, pages_read").gte("day", rangeStart).lt("day", month.end)
+    metrics.includes("books")
+      ? supabase
+          .from("books")
+          .select("finished_at")
+          .eq("status", "finished")
+          .gte("finished_at", rangeStart)
+          .lt("finished_at", rangeEnd)
       : Promise.resolve({ data: [], error: null }),
   ]);
   const error =
-    goalsResult.error ??
-    tasksResult.error ??
-    workoutsResult.error ??
-    stepsResult.error ??
-    sessionsResult.error;
+    goalsResult.error ?? tasksResult.error ?? workoutsResult.error ?? stepsResult.error ?? booksResult.error;
   if (error) throw error;
 
   const weekKeys = Array.from({ length: 7 }, (_, index) => toDayKey(addDays(parseDayKey(week.start), index)));
-  const empty = (): PeriodCounts => ({ today: 0, week: 0, month: 0, weekDays: [0, 0, 0, 0, 0, 0, 0] });
+  const empty = (): PeriodCounts => ({ today: 0, week: 0, month: 0, year: 0, weekDays: [0, 0, 0, 0, 0, 0, 0] });
   const counts = Object.fromEntries(metrics.map((metric) => [metric, empty()])) as Record<GoalMetric, PeriodCounts>;
 
   function add(metric: GoalMetric, day: string, amount: number) {
@@ -84,6 +93,7 @@ async function loadGoals(metrics: GoalMetric[], today: string): Promise<{
       if (index >= 0) bucket.weekDays[index] += amount;
     }
     if (inDayRange(day, month.start, month.end)) bucket.month += amount;
+    if (inDayRange(day, year.start, year.end)) bucket.year += amount;
   }
 
   for (const row of (tasksResult.data ?? []) as { task_date: string; done: boolean }[]) {
@@ -97,8 +107,8 @@ async function loadGoals(metrics: GoalMetric[], today: string): Promise<{
   for (const row of (stepsResult.data ?? []) as { day: string; steps: number }[]) {
     add("steps", row.day, Number(row.steps) || 0);
   }
-  for (const row of (sessionsResult.data ?? []) as { day: string; pages_read: number | string }[]) {
-    add("pages", row.day, Number(row.pages_read) || 0);
+  for (const row of (booksResult.data ?? []) as { finished_at: string | null }[]) {
+    if (row.finished_at) add("books", row.finished_at.slice(0, 10), 1);
   }
 
   return {
@@ -106,6 +116,7 @@ async function loadGoals(metrics: GoalMetric[], today: string): Promise<{
       ...goal,
       weekly_target: goal.weekly_target == null ? null : Number(goal.weekly_target),
       monthly_target: goal.monthly_target == null ? null : Number(goal.monthly_target),
+      yearly_target: goal.yearly_target == null ? null : Number(goal.yearly_target),
     })),
     counts,
   };
@@ -153,7 +164,7 @@ export default function GoalBoard({
     };
   }, [todayKey, metricKey]);
 
-  async function save(drafts: Record<GoalMetric, { weekly: string; monthly: string }>) {
+  async function save(drafts: Record<GoalMetric, { weekly: string; monthly: string; yearly: string }>) {
     setSaving(true);
     setError(null);
     try {
@@ -161,9 +172,10 @@ export default function GoalBoard({
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData.user) throw new Error("Your session expired. Sign in again.");
       for (const metric of Object.keys(drafts) as GoalMetric[]) {
-        const weekly = parseTarget(drafts[metric].weekly);
-        const monthly = parseTarget(drafts[metric].monthly);
-        if (weekly == null && monthly == null) {
+        const weekly = metric === "books" ? null : parseTarget(drafts[metric].weekly);
+        const monthly = metric === "books" ? null : parseTarget(drafts[metric].monthly);
+        const yearly = metric === "books" ? parseTarget(drafts[metric].yearly) : null;
+        if (weekly == null && monthly == null && yearly == null) {
           const { error: deleteError } = await supabase.from("goals").delete().eq("metric", metric);
           if (deleteError) throw deleteError;
           continue;
@@ -174,6 +186,7 @@ export default function GoalBoard({
             metric,
             weekly_target: weekly,
             monthly_target: monthly,
+            yearly_target: yearly,
           },
           { onConflict: "user_id,metric" },
         );
@@ -199,6 +212,8 @@ export default function GoalBoard({
   if (!todayKey) return null;
   const month = monthBounds(todayKey);
   const week = weekBounds(todayKey);
+  const year = yearBounds(todayKey);
+  const booksOnly = metrics.length === 1 && metrics[0] === "books";
 
   if (!charts) {
     return (
@@ -208,7 +223,7 @@ export default function GoalBoard({
           onClick={() => setEditing((current) => (current ? null : metrics))}
           className="min-h-12 w-full rounded-xl bg-card text-sm font-semibold"
         >
-          {editing ? "Close goals" : "Weekly and monthly goals"}
+          {editing ? "Close goals" : booksOnly ? "Yearly reading goal" : "Weekly and monthly goals"}
         </button>
         {error ? <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
         {editing ? (
@@ -223,8 +238,14 @@ export default function GoalBoard({
   return (
     <section className="mb-5 space-y-3">
       <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Progress</h2>
-        <p className="mt-1 text-sm text-muted">Today, this week, and this month against your goals.</p>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+          {booksOnly ? "Reading goal" : "Progress"}
+        </h2>
+        <p className="mt-1 text-sm text-muted">
+          {booksOnly
+            ? "Set a number of books for the year. A finished book counts for that week, month, and year."
+            : "Today, this week, and this month against your goals."}
+        </p>
       </div>
       {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
       {editing ? (
@@ -248,12 +269,15 @@ export default function GoalBoard({
               <MetricCard
                 key={metric}
                 metric={metric}
-                weeklyTarget={goal?.weekly_target ?? null}
-                monthlyTarget={goal?.monthly_target ?? null}
+                weeklyTarget={metric === "books" ? bookTargets(goal?.yearly_target ?? null).week : (goal?.weekly_target ?? null)}
+                monthlyTarget={metric === "books" ? bookTargets(goal?.yearly_target ?? null).month : (goal?.monthly_target ?? null)}
+                yearlyTarget={goal?.yearly_target ?? null}
                 count={count}
                 weekDay={week.day}
                 monthDay={month.day}
                 monthDays={month.days}
+                yearDay={year.day}
+                yearDays={year.days}
                 onEdit={() =>
                   setEditing((current) => (current?.length === 1 && current[0] === metric ? null : [metric]))
                 }
@@ -287,15 +311,16 @@ function GoalEditor({
   metrics: GoalMetric[];
   goals: Goal[];
   saving: boolean;
-  onSave: (drafts: Record<GoalMetric, { weekly: string; monthly: string }>) => Promise<void>;
+  onSave: (drafts: Record<GoalMetric, { weekly: string; monthly: string; yearly: string }>) => Promise<void>;
 }) {
   const [drafts, setDrafts] = useState(() => {
-    const initial = {} as Record<GoalMetric, { weekly: string; monthly: string }>;
+    const initial = {} as Record<GoalMetric, { weekly: string; monthly: string; yearly: string }>;
     for (const metric of metrics) {
       const goal = goals.find((item) => item.metric === metric);
       initial[metric] = {
         weekly: goal?.weekly_target == null ? "" : String(goal.weekly_target),
         monthly: goal?.monthly_target == null ? "" : String(goal.monthly_target),
+        yearly: goal?.yearly_target == null ? "" : String(goal.yearly_target),
       };
     }
     return initial;
@@ -311,7 +336,28 @@ function GoalEditor({
         void onSave(drafts).catch((reason: Error) => setFormError(reason.message));
       }}
     >
-      {metrics.map((metric) => (
+      {metrics.map((metric) =>
+        metric === "books" ? (
+          <fieldset key={metric} className="space-y-2">
+            <legend className="text-sm font-medium">Books to finish this year</legend>
+            <input
+              inputMode="numeric"
+              className={field}
+              value={drafts[metric].yearly}
+              onChange={(event) =>
+                setDrafts((current) => ({
+                  ...current,
+                  [metric]: { ...current[metric], yearly: event.target.value },
+                }))
+              }
+            />
+            {Number(drafts[metric].yearly) > 0 ? (
+              <p className="text-sm text-muted">{bookGoalSentence(Number(drafts[metric].yearly))}</p>
+            ) : (
+              <p className="text-sm text-muted">The year is split into a month and a week. Pages stay on each book.</p>
+            )}
+          </fieldset>
+        ) : (
         <fieldset key={metric} className="space-y-2">
           <legend className="text-sm font-medium">{metricLabel(metric)}</legend>
           <div className="grid grid-cols-2 gap-2">
@@ -345,7 +391,8 @@ function GoalEditor({
             </label>
           </div>
         </fieldset>
-      ))}
+        ),
+      )}
       {formError ? <p className="text-sm text-red-600 dark:text-red-400">{formError}</p> : null}
       <button
         type="submit"
@@ -362,24 +409,31 @@ function MetricCard({
   metric,
   weeklyTarget,
   monthlyTarget,
+  yearlyTarget,
   count,
   weekDay,
   monthDay,
   monthDays,
+  yearDay,
+  yearDays,
   onEdit,
 }: {
   metric: GoalMetric;
   weeklyTarget: number | null;
   monthlyTarget: number | null;
+  yearlyTarget: number | null;
   count: PeriodCounts;
   weekDay: number;
   monthDay: number;
   monthDays: number;
+  yearDay: number;
+  yearDays: number;
   onEdit: () => void;
 }) {
-  const weekShare = dailyShare(weeklyTarget, 7);
-  const monthShare = dailyShare(monthlyTarget, monthDays);
-  const hasGoal = weeklyTarget != null || monthlyTarget != null;
+  const books = metric === "books";
+  const weekShare = books ? null : dailyShare(weeklyTarget, 7);
+  const monthShare = books ? null : dailyShare(monthlyTarget, monthDays);
+  const hasGoal = books ? yearlyTarget != null && yearlyTarget > 0 : weeklyTarget != null || monthlyTarget != null;
   const peak = Math.max(weekShare ?? 0, ...count.weekDays, 1);
   const dayLabels = ["M", "T", "W", "T", "F", "S", "S"];
 
@@ -392,9 +446,13 @@ function MetricCard({
         </button>
       </div>
       {hasGoal ? (
-        <p className="mt-1 text-sm text-muted">{shareSentence(metric, weekShare, monthShare)}</p>
+        <p className="mt-1 text-sm text-muted">
+          {books && yearlyTarget ? bookGoalSentence(yearlyTarget) : shareSentence(metric, weekShare, monthShare)}
+        </p>
       ) : (
-        <p className="mt-1 text-sm text-muted">Add a weekly and a monthly goal.</p>
+        <p className="mt-1 text-sm text-muted">
+          {books ? "Set how many books to finish this year." : "Add a weekly and a monthly goal."}
+        </p>
       )}
       <div className="mt-4 flex h-24 items-end gap-1" aria-hidden>
         {count.weekDays.map((amount, index) => {
@@ -414,12 +472,14 @@ function MetricCard({
         })}
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2">
-        <Column
-          label="Today"
-          value={formatAmount(metric, count.today)}
-          detail={todayDetail(metric, count.today, weekShare, monthShare)}
-          percent={null}
-        />
+        {books ? null : (
+          <Column
+            label="Today"
+            value={formatAmount(metric, count.today)}
+            detail={todayDetail(metric, count.today, weekShare, monthShare)}
+            percent={null}
+          />
+        )}
         <Column
           label="This week"
           value={targetText(metric, count.week, weeklyTarget)}
@@ -432,6 +492,14 @@ function MetricCard({
           detail={paceLabel(metric, count.month, monthlyTarget, monthDay, monthDays)}
           percent={percent(count.month, monthlyTarget)}
         />
+        {books ? (
+          <Column
+            label="This year"
+            value={targetText(metric, count.year, yearlyTarget)}
+            detail={paceLabel(metric, count.year, yearlyTarget, yearDay, yearDays)}
+            percent={percent(count.year, yearlyTarget)}
+          />
+        ) : null}
       </div>
     </article>
   );

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { GoalMetric } from "@/types";
 import { createClient } from "@/lib/supabase/client";
-import { formatAmount, metricLabel, type PeriodCounts } from "@/lib/goals";
+import { bookTargets, formatAmount, metricLabel, type PeriodCounts } from "@/lib/goals";
 
 interface Member {
   user_id: string;
@@ -17,9 +17,9 @@ interface FamilySummary {
   tasks: PeriodCounts;
   workout_minutes: PeriodCounts;
   workouts: PeriodCounts;
-  pages: PeriodCounts;
+  books: PeriodCounts | null;
   steps: PeriodCounts;
-  goals: { metric: GoalMetric; weekly_target: number | null; monthly_target: number | null }[];
+  goals: { metric: GoalMetric; weekly_target: number | null; monthly_target: number | null; yearly_target: number | null }[];
 }
 
 const OPEN_KEY = "daily-hub-family-open";
@@ -66,6 +66,7 @@ function counts(value: unknown): PeriodCounts {
     today: Number(row.today) || 0,
     week: Number(row.week) || 0,
     month: Number(row.month) || 0,
+    year: Number(row.year) || 0,
     weekDays: days.slice(0, 7),
   };
 }
@@ -77,13 +78,13 @@ function asSummary(value: unknown): FamilySummary {
     tasks: counts(row.tasks),
     workout_minutes: counts(row.workout_minutes),
     workouts: counts(row.workouts),
-    pages: counts(row.pages),
+    books: row.books == null ? null : counts(row.books),
     steps: counts(row.steps),
     goals: goals.flatMap((item) => {
       if (!item || typeof item !== "object") return [];
       const goal = item as Record<string, unknown>;
       const metric = goal.metric;
-      if (metric !== "tasks" && metric !== "workout_minutes" && metric !== "workouts" && metric !== "pages" && metric !== "steps") {
+      if (metric !== "tasks" && metric !== "workout_minutes" && metric !== "workouts" && metric !== "books" && metric !== "steps") {
         return [];
       }
       return [
@@ -91,6 +92,7 @@ function asSummary(value: unknown): FamilySummary {
           metric,
           weekly_target: goal.weekly_target == null ? null : Number(goal.weekly_target),
           monthly_target: goal.monthly_target == null ? null : Number(goal.monthly_target),
+          yearly_target: goal.yearly_target == null ? null : Number(goal.yearly_target),
         },
       ];
     }),
@@ -289,22 +291,28 @@ function SummaryCard({ summary }: { summary: FamilySummary }) {
   const lines: { metric: GoalMetric; count: PeriodCounts }[] = [
     { metric: "tasks", count: summary.tasks },
     { metric: "workout_minutes", count: summary.workout_minutes },
-    { metric: "pages", count: summary.pages },
+    ...(summary.books ? [{ metric: "books" as const, count: summary.books }] : []),
     { metric: "steps", count: summary.steps },
   ];
   const peak = Math.max(...summary.tasks.weekDays, 1);
   return (
     <div className="mt-3 space-y-2">
       {lines.map(({ metric, count }) => {
-        const weekly = summary.goals.find((goal) => goal.metric === metric)?.weekly_target;
+        const goal = summary.goals.find((item) => item.metric === metric);
+        const weekly = metric === "books" ? bookTargets(goal?.yearly_target ?? null).week : goal?.weekly_target;
         const weekText =
           weekly == null ? formatAmount(metric, count.week) : `${formatAmount(metric, count.week)} of ${formatAmount(metric, weekly)}`;
+        const yearText =
+          metric === "books" && goal?.yearly_target
+            ? ` · year ${formatAmount(metric, count.year)} of ${formatAmount(metric, goal.yearly_target)}`
+            : "";
         return (
           <p key={metric} className="text-sm">
             <span className="font-medium">{metricLabel(metric)}</span>
             <span className="text-muted">
               {" "}
               · today {formatAmount(metric, count.today)} · week {weekText}
+              {yearText}
             </span>
           </p>
         );

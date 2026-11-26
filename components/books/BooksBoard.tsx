@@ -293,7 +293,7 @@ function BooksScreen() {
       throw new Error("This book is already finished.");
     }
     const pagesToLog = Math.min(pages, pagesLeft(book));
-    const next = nextBookState(book, { currentPage: book.current_page + pagesToLog }, todayKey);
+    const next = nextBookState(book, { currentPage: book.current_page + pagesToLog }, day);
     const supabase = createClient();
     const { data: session, error: insertError } = await supabase
       .from("reading_sessions")
@@ -330,7 +330,7 @@ function BooksScreen() {
   return (
     <>
       <PageHeader title="Books" subtitle={`${yearFinished.length} finished this year`} />
-      <GoalBoard metrics={["pages"]} />
+      <GoalBoard metrics={["books"]} charts />
 
       {adding ? (
         <BookForm

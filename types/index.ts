@@ -75,13 +75,14 @@ export interface AiUsage {
   cost_cents: number;
 }
 
-export type GoalMetric = "tasks" | "workout_minutes" | "workouts" | "pages" | "steps";
+export type GoalMetric = "tasks" | "workout_minutes" | "workouts" | "books" | "steps";
 
 export interface Goal {
   user_id: string;
   metric: GoalMetric;
   weekly_target: number | null;
   monthly_target: number | null;
+  yearly_target: number | null;
 }
 
 export interface Hobby {

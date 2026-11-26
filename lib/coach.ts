@@ -35,7 +35,28 @@ export function estimateCents(inputTokens: number | null, outputTokens: number |
   return Math.max(0.0001, Math.round(dollars * 100 * 10_000) / 10_000);
 }
 
+export interface CoachInsight {
+  summary: string;
+  recommendations: string[];
+  tips: string[];
+}
+
+function cleanLines(value: unknown, limit: number, max: number): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, limit)
+    .map((item) => item.slice(0, max));
+}
+
 export function parseTips(content: string): string[] | null {
+  return parseCoach(content)?.tips ?? null;
+}
+
+/** Accepts a legacy tip list or the fuller coach object. */
+export function parseCoach(content: string): CoachInsight | null {
   const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
   let value: unknown;
   try {
@@ -43,19 +64,46 @@ export function parseTips(content: string): string[] | null {
   } catch {
     return null;
   }
-  const raw = Array.isArray(value)
-    ? value
-    : value && typeof value === "object" && "tips" in value
-      ? (value as { tips: unknown }).tips
-      : null;
-  if (!Array.isArray(raw)) return null;
-  const tips = raw
-    .filter((item): item is string => typeof item === "string")
-    .map((tip) => tip.trim())
-    .filter(Boolean)
-    .slice(0, 3)
-    .map((tip) => tip.slice(0, 180));
-  return tips.length === 3 ? tips : null;
+  return readStoredInsight(value);
+}
+
+export function readStoredInsight(value: unknown): CoachInsight | null {
+  if (Array.isArray(value)) {
+    const tips = cleanLines(value, 3, 180);
+    return tips.length === 3 ? { summary: "", recommendations: [], tips } : null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const record = value as { summary?: unknown; recommendations?: unknown; tips?: unknown };
+  const tips = cleanLines(record.tips, 3, 180);
+  if (tips.length !== 3) return null;
+  const summary = typeof record.summary === "string" ? record.summary.trim().slice(0, 400) : "";
+  return {
+    summary,
+    recommendations: cleanLines(record.recommendations, 3, 200),
+    tips,
+  };
+}
+
+export function insightIsComplete(insight: CoachInsight): boolean {
+  return insight.summary.length > 0 && insight.recommendations.length === 3 && insight.tips.length === 3;
+}
+
+export function parseQuote(content: string): { quote: string; author: string } | null {
+  const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
+  let value: unknown;
+  try {
+    value = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const quote = "quote" in value && typeof value.quote === "string" ? value.quote.trim().slice(0, 180) : "";
+  if (quote.length < 8) return null;
+  const author =
+    "author" in value && typeof value.author === "string" && value.author.trim()
+      ? value.author.trim().slice(0, 40)
+      : "Daily Hub";
+  return { quote, author };
 }
 
 export interface WeekBriefInput {
@@ -72,6 +120,7 @@ export interface WeekBriefInput {
   activeStreak: number;
   readingStreak: number;
   books: { title: string; pagesLeft: number }[];
+  hobbies: string[];
 }
 
 export function buildWeekBrief(input: WeekBriefInput): string {
@@ -91,7 +140,10 @@ export function buildWeekBrief(input: WeekBriefInput): string {
     `Steps: ${steps}.`,
     `Reading: ${input.pagesRead} pages on ${input.readingDays} days. Reading streak: ${input.readingStreak} days.`,
     `Books in progress: ${bookLine}`,
-  ].join("\n");
+    input.hobbies.length > 0 ? `Hobbies: ${input.hobbies.slice(0, 12).join(", ")}.` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function streakEnding(days: Iterable<string>, today: string): number {
