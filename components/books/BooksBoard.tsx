@@ -40,19 +40,62 @@ function friendlyError(message: string): string {
   return message;
 }
 
-function cleanCover(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  let url: URL;
+const COVER_BUCKET = "book-covers";
+
+function storagePathFromUrl(url: string | null): string | null {
+  if (!url) return null;
+  const marker = `/object/public/${COVER_BUCKET}/`;
+  const index = url.indexOf(marker);
+  if (index < 0) return null;
+  return decodeURIComponent(url.slice(index + marker.length).split("?")[0]);
+}
+
+async function shrinkCover(file: File): Promise<Blob> {
+  if (!file.type.startsWith("image/")) throw new Error("Choose a photo.");
+  if (file.size > 15_000_000) throw new Error("That photo is too large. Choose one under 15 MB.");
+  let bitmap: ImageBitmap;
   try {
-    url = new URL(trimmed);
+    bitmap = await createImageBitmap(file);
   } catch {
-    throw new Error("Cover link must start with http:// or https://.");
+    throw new Error("Could not read that photo. Choose a JPEG or PNG.");
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Cover link must start with http:// or https://.");
+  const longest = Math.max(bitmap.width, bitmap.height);
+  const scale = Math.min(1, 800 / longest);
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    bitmap.close();
+    throw new Error("Could not read that photo.");
   }
-  return url.toString().slice(0, 500);
+  context.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+  if (!blob) throw new Error("Could not read that photo.");
+  return blob;
+}
+
+async function uploadCover(userId: string, bookId: string, file: File): Promise<string> {
+  const blob = await shrinkCover(file);
+  const path = `${userId}/${bookId}.jpg`;
+  const supabase = createClient();
+  const { error } = await supabase.storage.from(COVER_BUCKET).upload(path, blob, {
+    upsert: true,
+    contentType: "image/jpeg",
+  });
+  if (error) {
+    if (/bucket|not found|row-level|policy|permission/i.test(error.message)) {
+      throw new Error(
+        "Cover storage is missing. In Supabase, open the SQL Editor, paste supabase/migrations/0004_book_covers.sql, and run it.",
+      );
+    }
+    throw new Error(error.message);
+  }
+  const { data } = supabase.storage.from(COVER_BUCKET).getPublicUrl(path);
+  return `${data.publicUrl}?v=${Date.now()}`;
 }
 
 interface BookDraft {
@@ -62,10 +105,12 @@ interface BookDraft {
   currentPage: string;
   status: BookStatus;
   coverUrl: string;
+  coverFile: File | null;
+  clearCover: boolean;
 }
 
 function emptyDraft(): BookDraft {
-  return { title: "", author: "", totalPages: "", currentPage: "0", status: "want", coverUrl: "" };
+  return { title: "", author: "", totalPages: "", currentPage: "0", status: "want", coverUrl: "", coverFile: null, clearCover: false };
 }
 
 function draftFromBook(book: Book): BookDraft {
@@ -76,6 +121,8 @@ function draftFromBook(book: Book): BookDraft {
     currentPage: String(book.current_page),
     status: book.status,
     coverUrl: book.cover_url ?? "",
+    coverFile: null,
+    clearCover: false,
   };
 }
 
@@ -89,7 +136,6 @@ function payloadFromDraft(draft: BookDraft, today: string, existing?: Book) {
     throw new Error("Current page must be a whole number, or 0.");
   }
   const author = draft.author.trim().slice(0, 200);
-  const cover = cleanCover(draft.coverUrl);
   const base: Book = existing ?? {
     id: "",
     user_id: "",
@@ -98,7 +144,7 @@ function payloadFromDraft(draft: BookDraft, today: string, existing?: Book) {
     total_pages: total,
     current_page: 0,
     status: draft.status,
-    cover_url: cover,
+    cover_url: null,
     finished_at: null,
     created_at: "",
   };
@@ -107,12 +153,13 @@ function payloadFromDraft(draft: BookDraft, today: string, existing?: Book) {
     { status: draft.status, currentPage: draft.status === "finished" ? total : typedPage, totalPages: total },
     today,
   );
-  return {
+  const row = {
     title,
     author: author || null,
-    cover_url: cover,
     ...next,
   };
+  if (draft.clearCover) return { ...row, cover_url: null };
+  return row;
 }
 
 async function fetchLibrary(): Promise<{ books: Book[]; sessions: ReadingSession[] }> {
@@ -202,10 +249,30 @@ function BooksScreen() {
     if (!todayKey) return;
     const payload = payloadFromDraft(draft, todayKey, existing);
     const supabase = createClient();
-    const result = existing
-      ? await supabase.from("books").update(payload).eq("id", existing.id)
-      : await supabase.from("books").insert(payload);
-    if (result.error) throw new Error(friendlyError(result.error.message));
+    const wrote = existing
+      ? await supabase.from("books").update(payload).eq("id", existing.id).select("id").single()
+      : await supabase.from("books").insert(payload).select("id").single();
+    if (wrote.error || !wrote.data) {
+      throw new Error(friendlyError(wrote.error?.message ?? "Could not save the book."));
+    }
+    const bookId = wrote.data.id;
+
+    if (draft.coverFile) {
+      try {
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError || !userData.user) throw new Error("Your session expired. Sign in again.");
+        const coverUrl = await uploadCover(userData.user.id, bookId, draft.coverFile);
+        const { error: coverError } = await supabase.from("books").update({ cover_url: coverUrl }).eq("id", bookId);
+        if (coverError) throw new Error(friendlyError(coverError.message));
+      } catch (coverProblem) {
+        if (!existing) await supabase.from("books").delete().eq("id", bookId);
+        throw coverProblem;
+      }
+    } else if (draft.clearCover && existing?.cover_url) {
+      const path = storagePathFromUrl(existing.cover_url);
+      if (path) await supabase.storage.from(COVER_BUCKET).remove([path]);
+    }
+
     setAdding(false);
     setEditingId(null);
     await refresh();
@@ -411,9 +478,26 @@ function BookForm({
   const [draft, setDraft] = useState<BookDraft>(initial ?? emptyDraft());
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const shownCover = previewUrl ?? (draft.clearCover ? null : draft.coverUrl || null);
 
   function set<K extends keyof BookDraft>(key: K, value: BookDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function chooseCover(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setFormError("Choose a photo.");
+      return;
+    }
+    setFormError(null);
+    setPreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return URL.createObjectURL(file);
+    });
+    set("coverFile", file);
+    set("clearCover", false);
   }
 
   return (
@@ -471,16 +555,45 @@ function BookForm({
           />
         </label>
       ) : null}
-      <label className="block text-sm font-medium">
-        Cover link (optional)
-        <input
-          className={`mt-1 ${field}`}
-          inputMode="url"
-          placeholder="https://"
-          value={draft.coverUrl}
-          onChange={(event) => set("coverUrl", event.target.value)}
-        />
-      </label>
+      <div className="space-y-2">
+        {shownCover ? (
+          <div
+            aria-hidden
+            className="h-24 w-16 rounded-md bg-background bg-cover bg-center"
+            style={{ backgroundImage: `url(${JSON.stringify(shownCover)})` }}
+          />
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <label className="flex min-h-12 cursor-pointer items-center justify-center rounded-xl bg-background px-4 text-sm font-medium">
+            {shownCover ? "Change cover" : "Add a cover photo"}
+            <input
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={(event) => {
+                chooseCover(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </label>
+          {shownCover ? (
+            <button
+              type="button"
+              onClick={() => {
+                setPreviewUrl((current) => {
+                  if (current) URL.revokeObjectURL(current);
+                  return null;
+                });
+                set("coverFile", null);
+                set("clearCover", true);
+              }}
+              className="min-h-12 rounded-xl bg-background px-4 text-sm font-medium"
+            >
+              Remove cover
+            </button>
+          ) : null}
+        </div>
+      </div>
       {formError ? <p className="text-sm text-red-600 dark:text-red-400">{formError}</p> : null}
       <p className="sr-only">{today}</p>
       <div className="flex gap-2">
