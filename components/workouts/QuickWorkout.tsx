@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import type { WorkoutType } from "@/types";
 import { createClient } from "@/lib/supabase/client";
@@ -115,16 +116,24 @@ export default function QuickWorkout() {
           </div>
         </form>
       ) : (
-        <button
-          type="button"
-          onClick={() => {
-            setOpen(true);
-            setError(null);
-          }}
-          className="min-h-12 w-full rounded-xl bg-card text-sm font-semibold"
-        >
-          Record a workout
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(true);
+              setError(null);
+            }}
+            className="min-h-12 w-full rounded-xl bg-card text-sm font-semibold"
+          >
+            Record a workout
+          </button>
+          <Link
+            href="/workouts/track"
+            className="mt-2 flex min-h-12 w-full items-center justify-center rounded-xl bg-accent text-sm font-semibold text-white dark:text-neutral-950"
+          >
+            Track a run or walk
+          </Link>
+        </>
       )}
     </section>
   );

@@ -198,16 +198,24 @@ function WorkoutScreen() {
           onSubmit={(draft) => saveWorkout(draft, formMode === "new" ? undefined : formMode)}
         />
       ) : (
-        <button
-          type="button"
-          onClick={() => {
-            setConfirmingId(null);
-            setFormMode("new");
-          }}
-          className="mb-5 min-h-12 w-full rounded-xl bg-accent text-base font-semibold text-white dark:text-neutral-950"
-        >
-          Log a workout
-        </button>
+        <div className="mb-5 space-y-2">
+          <Link
+            href="/workouts/track"
+            className="flex min-h-12 w-full items-center justify-center rounded-xl bg-accent text-base font-semibold text-white dark:text-neutral-950"
+          >
+            Track a run or walk
+          </Link>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmingId(null);
+              setFormMode("new");
+            }}
+            className="min-h-12 w-full rounded-xl bg-card text-base font-semibold"
+          >
+            Log a workout
+          </button>
+        </div>
       )}
 
       <GoalBoard metrics={["workout_minutes", "workouts"]} />
