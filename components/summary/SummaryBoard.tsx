@@ -6,6 +6,7 @@ import type { Book, DailySteps, ReadingSession, Task, Workout } from "@/types";
 import PageHeader from "@/components/PageHeader";
 import SetupNotice from "@/components/SetupNotice";
 import WeeklyInsight from "@/components/summary/WeeklyInsight";
+import FamilyBoard from "@/components/summary/FamilyBoard";
 import GoalBoard from "@/components/goals/GoalBoard";
 import { ALL_GOAL_METRICS } from "@/lib/goals";
 import { createClient } from "@/lib/supabase/client";
@@ -147,7 +148,8 @@ function SummaryScreen() {
   return (
     <>
       <PageHeader title="Summary" subtitle="Today, this week, and this month against your goals" />
-      <GoalBoard metrics={ALL_GOAL_METRICS} />
+      <GoalBoard metrics={ALL_GOAL_METRICS} charts />
+      {todayKey ? <FamilyBoard todayKey={todayKey} /> : null}
       {error ? (
         <p role="alert" className="mb-4 rounded-2xl bg-card px-4 py-3 text-sm text-red-600 dark:text-red-400">
           {error}

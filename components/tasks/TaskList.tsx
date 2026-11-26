@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Priority, Task } from "@/types";
+import type { Priority, Task, TaskKind } from "@/types";
 import { moveTask } from "@/lib/tasks";
 
 const PRIORITY_LABEL: Record<Priority, string> = {
@@ -16,10 +16,17 @@ const PRIORITY_BAR: Record<Priority, string> = {
   high: "border-l-red-500",
 };
 
+const KIND_LABEL: Record<TaskKind, string> = {
+  task: "Task",
+  exercise: "Exercise",
+  workout: "Workout",
+};
+
 type Draft = {
   title: string;
   note: string;
   priority: Priority | null;
+  kind: TaskKind;
 };
 
 export default function TaskList({
@@ -197,6 +204,7 @@ function TaskRow({
     title: task.title,
     note: task.note ?? "",
     priority: task.priority,
+    kind: task.kind ?? "task",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -245,6 +253,24 @@ function TaskRow({
             placeholder="Note (optional)"
             className="w-full rounded-xl bg-background px-3 py-3 text-base outline-none focus:ring-2 focus:ring-accent"
           />
+          <div className="grid grid-cols-3 gap-2">
+            {(Object.keys(KIND_LABEL) as TaskKind[]).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={draft.kind === option}
+                onClick={() => setDraft({ ...draft, kind: option })}
+                className={`min-h-11 rounded-xl text-sm font-medium ${
+                  draft.kind === option ? "bg-accent text-white dark:text-neutral-950" : "bg-background"
+                }`}
+              >
+                {KIND_LABEL[option]}
+              </button>
+            ))}
+          </div>
+          {draft.kind === "task" ? null : (
+            <p className="text-sm text-muted">Include the minutes in the description, for example 30 min run.</p>
+          )}
           <PriorityChips
             value={draft.priority}
             onChange={(priority) => setDraft({ ...draft, priority })}
@@ -299,6 +325,11 @@ function TaskRow({
             {task.note ? (
               <p className="mt-1 text-sm text-muted break-words">{task.note}</p>
             ) : null}
+            {task.kind && task.kind !== "task" ? (
+              <p className="mt-2">
+                <span className="rounded-full bg-background px-2 py-1 text-xs font-medium">{KIND_LABEL[task.kind]}</span>
+              </p>
+            ) : null}
             {task.priority ? (
               <p className="mt-2">
                 <span className="rounded-full bg-background px-2 py-1 text-xs font-medium">
@@ -332,6 +363,7 @@ function TaskRow({
                       title: task.title,
                       note: task.note ?? "",
                       priority: task.priority,
+                      kind: task.kind ?? "task",
                     });
                     setEditing(true);
                   }}

@@ -1,23 +1,75 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { Priority, Task } from "@/types";
+import type { Priority, Task, TaskKind } from "@/types";
 import PageHeader from "@/components/PageHeader";
 import EmptyState from "@/components/EmptyState";
 import SetupNotice from "@/components/SetupNotice";
 import SignOutButton from "@/components/auth/SignOutButton";
 import TaskList, { type TaskDraft } from "@/components/tasks/TaskList";
-import GoalBoard from "@/components/goals/GoalBoard";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { addDays, formatLongDate, parseDayKey, relativeDayLabel, toDayKey } from "@/lib/dates";
 import { sortTasks } from "@/lib/tasks";
+import { workoutFromTask } from "@/lib/task-workout";
 
 function subscribe() {
   return () => {};
 }
 
+async function syncLinkedWorkout(task: Pick<Task, "id" | "task_date" | "title" | "note" | "kind">) {
+  const supabase = createClient();
+  if (task.kind === "task") {
+    const { error } = await supabase.from("workouts").delete().eq("task_id", task.id);
+    if (error && !/task_id|schema cache|column/i.test(error.message)) {
+      throw new Error(friendlyError(error.message));
+    }
+    return;
+  }
+  const parsed = workoutFromTask(task.title, task.note);
+  const { data: existing, error: lookupError } = await supabase
+    .from("workouts")
+    .select("id")
+    .eq("task_id", task.id)
+    .maybeSingle();
+  if (lookupError) throw new Error(friendlyError(lookupError.message));
+  const fields = {
+    type: parsed.type,
+    duration_min: parsed.durationMin,
+    distance_km: parsed.distanceKm,
+    notes: parsed.notes,
+    task_id: task.id,
+  };
+  if (existing?.id) {
+    const { error } = await supabase.from("workouts").update(fields).eq("id", existing.id);
+    if (error) throw new Error(friendlyError(error.message));
+    return;
+  }
+  const clock = new Date();
+  const started = parseDayKey(task.task_date);
+  started.setHours(clock.getHours(), clock.getMinutes(), 0, 0);
+  const { error } = await supabase.from("workouts").insert({
+    ...fields,
+    started_at: started.toISOString(),
+    source: "manual",
+  });
+  if (error?.code === "23505") {
+    started.setMinutes(started.getMinutes() + 1);
+    const retry = await supabase.from("workouts").insert({
+      ...fields,
+      started_at: started.toISOString(),
+      source: "manual",
+    });
+    if (retry.error) throw new Error(friendlyError(retry.error.message));
+    return;
+  }
+  if (error) throw new Error(friendlyError(error.message));
+}
+
 function friendlyError(message: string): string {
+  if (/kind|task_id|schema cache|column/i.test(message)) {
+    return "In Supabase, open the SQL Editor, paste supabase/migrations/0006_task_workouts.sql, and run it.";
+  }
   if (/relation|schema cache|does not exist/i.test(message)) {
     return "The tasks table is missing. In Supabase, open the SQL Editor, paste supabase/migrations/0001_init.sql, and run it.";
   }
@@ -66,7 +118,7 @@ function TaskScreen() {
       setError(null);
       const { data, error: loadError } = await createClient()
         .from("tasks")
-        .select("id, user_id, title, note, priority, task_date, done, position, created_at")
+        .select("id, user_id, title, note, priority, task_date, kind, done, position, created_at")
         .eq("task_date", activeDate)
         .order("position", { ascending: true });
 
@@ -119,7 +171,7 @@ function TaskScreen() {
     if (!activeDate) return;
     const { data, error: loadError } = await createClient()
       .from("tasks")
-      .select("id, user_id, title, note, priority, task_date, done, position, created_at")
+      .select("id, user_id, title, note, priority, task_date, kind, done, position, created_at")
       .eq("task_date", activeDate)
       .order("position", { ascending: true });
     if (loadError) {
@@ -157,17 +209,18 @@ function TaskScreen() {
 
   async function save(task: Task, draft: TaskDraft) {
     const note = draft.note.trim() || null;
+    const kind = draft.kind;
+    if (kind !== "task") workoutFromTask(draft.title, note);
     const { error: updateError } = await createClient()
       .from("tasks")
-      .update({ title: draft.title, note, priority: draft.priority })
+      .update({ title: draft.title, note, priority: draft.priority, kind })
       .eq("id", task.id);
     if (updateError) throw new Error(friendlyError(updateError.message));
+    await syncLinkedWorkout({ id: task.id, task_date: task.task_date, title: draft.title, note, kind });
     setTasks((current) =>
       sortTasks(
         current.map((item) =>
-          item.id === task.id
-            ? { ...item, title: draft.title, note, priority: draft.priority }
-            : item,
+          item.id === task.id ? { ...item, title: draft.title, note, priority: draft.priority, kind } : item,
         ),
       ),
     );
@@ -192,7 +245,7 @@ function TaskScreen() {
     const supabase = createClient();
     const { data, error: loadError } = await supabase
       .from("tasks")
-      .select("id, user_id, title, note, priority, task_date, done, position, created_at")
+      .select("id, user_id, title, note, priority, task_date, kind, done, position, created_at")
       .eq("task_date", yesterday)
       .eq("done", false)
       .order("position", { ascending: true });
@@ -261,6 +314,103 @@ function TaskScreen() {
     const dy = point.clientY - start.y;
     if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
     shift(dx > 0 ? -1 : 1);
+  }
+
+  async function addTask(draft: {
+    title: string;
+    note: string | null;
+    priority: Priority | null;
+    kind: TaskKind;
+  }) {
+    if (!activeDate) return;
+    if (draft.kind !== "task") workoutFromTask(draft.title, draft.note);
+    const position = tasks.reduce((max, task) => Math.max(max, task.position), -1) + 1;
+    const { data, error: insertError } = await createClient()
+      .from("tasks")
+      .insert({
+        title: draft.title,
+        note: draft.note,
+        priority: draft.priority,
+        kind: draft.kind,
+        task_date: activeDate,
+        position,
+      })
+      .select("id, user_id, title, note, priority, task_date, kind, done, position, created_at")
+      .single();
+    if (insertError) throw new Error(friendlyError(insertError.message));
+    const created = { ...(data as Task), kind: (data as Task).kind ?? draft.kind };
+    await syncLinkedWorkout(created);
+    setTasks((current) => {
+      const next = sortTasks([...current, created]);
+      remember(next);
+      return next;
+    });
+    setAdding(false);
+  }
+
+  const focusToday = viewingToday && todoOnly;
+  const list = (
+    <>
+      {!ready ? (
+        <div className="space-y-2" aria-live="polite">
+          <p className="sr-only">Loading tasks</p>
+          <div className="h-20 animate-pulse rounded-2xl bg-card" />
+          <div className="h-20 animate-pulse rounded-2xl bg-card" />
+        </div>
+      ) : null}
+      {ready && tasks.length === 0 ? <EmptyState title="No tasks yet" hint="Add one when you are ready." /> : null}
+      {ready && tasks.length > 0 && todoOnly && tasks.every((task) => task.done) ? (
+        <EmptyState title="Today is clear" hint="Every task for today is done." />
+      ) : null}
+      {ready && tasks.some((task) => (todoOnly ? !task.done : true)) ? (
+        <TaskList
+          tasks={tasks}
+          hideDone={todoOnly}
+          onToggle={toggle}
+          onDelete={remove}
+          onSave={save}
+          onPreview={setTasks}
+          onCommit={(next) => void commitOrder(next)}
+        />
+      ) : null}
+      {adding ? <AddTaskForm disabled={!ready} onAdd={addTask} /> : null}
+      <button
+        type="button"
+        onClick={() => setAdding((open) => !open)}
+        className="mt-4 min-h-12 w-full rounded-xl bg-accent text-base font-semibold text-white dark:text-neutral-950"
+      >
+        {adding ? "Close" : "Add a task"}
+      </button>
+    </>
+  );
+
+  if (focusToday) {
+    return (
+      <>
+        <header className="mb-5 flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold">Today</h1>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setTodoOnly(false)}
+              className="min-h-11 px-2 text-sm font-medium text-muted"
+            >
+              Other days
+            </button>
+            <SignOutButton />
+          </div>
+        </header>
+        {error ? (
+          <div role="alert" className="mb-4 rounded-2xl bg-card px-4 py-3 text-sm">
+            <p className="text-red-600 dark:text-red-400">{error}</p>
+            <button type="button" onClick={() => void reload()} className="mt-2 min-h-11 font-medium text-accent">
+              Try again
+            </button>
+          </div>
+        ) : null}
+        {list}
+      </>
+    );
   }
 
   return (
@@ -342,32 +492,19 @@ function TaskScreen() {
         </button>
       ) : null}
 
-      <div className="mb-4 grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            setNotice(null);
-            setError(null);
-            setPicked("");
-            setTodoOnly(true);
-            setAdding(false);
-          }}
-          className={`min-h-12 rounded-xl text-sm font-semibold ${
-            viewingToday && todoOnly ? "bg-accent text-white dark:text-neutral-950" : "bg-card"
-          }`}
-        >
-          Today only
-        </button>
-        <button
-          type="button"
-          onClick={() => setAdding((open) => !open)}
-          className="min-h-12 rounded-xl bg-accent text-sm font-semibold text-white dark:text-neutral-950"
-        >
-          {adding ? "Close" : "Add a task"}
-        </button>
-      </div>
-
-      <GoalBoard metrics={["tasks"]} />
+      <button
+        type="button"
+        onClick={() => {
+          setNotice(null);
+          setError(null);
+          setPicked("");
+          setTodoOnly(true);
+          setAdding(false);
+        }}
+        className="mb-4 min-h-12 w-full rounded-xl bg-card text-sm font-semibold"
+      >
+        Today only
+      </button>
 
       {notice ? (
         <p role="status" className="mb-4 text-sm text-muted">
@@ -383,67 +520,7 @@ function TaskScreen() {
         </div>
       ) : null}
 
-      {adding ? (
-        <AddTaskForm
-          disabled={!ready}
-          onAdd={async (draft) => {
-            if (!activeDate) return;
-            const position = tasks.reduce((max, task) => Math.max(max, task.position), -1) + 1;
-            const { data, error: insertError } = await createClient()
-              .from("tasks")
-              .insert({
-                title: draft.title,
-                note: draft.note,
-                priority: draft.priority,
-                task_date: activeDate,
-                position,
-              })
-              .select("id, user_id, title, note, priority, task_date, done, position, created_at")
-              .single();
-            if (insertError) throw new Error(friendlyError(insertError.message));
-            const created = data as Task;
-            setTasks((current) => {
-              const next = sortTasks([...current, created]);
-              remember(next);
-              return next;
-            });
-            setAdding(false);
-          }}
-        />
-      ) : null}
-
-      {!ready ? (
-        <div className="space-y-2" aria-live="polite">
-          <p className="sr-only">Loading tasks</p>
-          <div className="h-20 animate-pulse rounded-2xl bg-card" />
-          <div className="h-20 animate-pulse rounded-2xl bg-card" />
-        </div>
-      ) : null}
-      {ready && tasks.length === 0 ? (
-        <EmptyState
-          title="No tasks for this day"
-          hint={viewingToday ? "Add a task, or carry over anything left from yesterday." : "Add a task to plan this day."}
-        />
-      ) : null}
-      {ready && tasks.length > 0 && todoOnly && tasks.every((task) => task.done) ? (
-        <EmptyState title="Today is clear" hint="Every task for today is done." />
-      ) : null}
-      {ready && tasks.some((task) => (todoOnly ? !task.done : true)) ? (
-        <TaskList
-          tasks={tasks}
-          hideDone={todoOnly}
-          onToggle={toggle}
-          onDelete={remove}
-          onSave={save}
-          onPreview={setTasks}
-          onCommit={(next) => void commitOrder(next)}
-        />
-      ) : null}
-      {ready && todoOnly && tasks.some((task) => task.done) ? (
-        <button type="button" onClick={() => setTodoOnly(false)} className="mt-3 min-h-11 text-sm font-medium text-accent">
-          Show finished
-        </button>
-      ) : null}
+      {list}
     </>
   );
 }
@@ -453,12 +530,18 @@ function AddTaskForm({
   onAdd,
 }: {
   disabled: boolean;
-  onAdd: (draft: { title: string; note: string | null; priority: Priority | null }) => Promise<void>;
+  onAdd: (draft: {
+    title: string;
+    note: string | null;
+    priority: Priority | null;
+    kind: TaskKind;
+  }) => Promise<void>;
 }) {
   const titleRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
   const [priority, setPriority] = useState<Priority | null>(null);
+  const [kind, setKind] = useState<TaskKind>("task");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -472,10 +555,11 @@ function AddTaskForm({
     setSaving(true);
     setError(null);
     try {
-      await onAdd({ title: trimmed, note: note.trim() || null, priority });
+      await onAdd({ title: trimmed, note: note.trim() || null, priority, kind });
       setTitle("");
       setNote("");
       setPriority(null);
+      setKind("task");
       titleRef.current?.focus();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Could not add the task.");
@@ -502,9 +586,39 @@ function AddTaskForm({
           className="w-full min-h-12 rounded-xl bg-background px-4 text-base outline-none focus:ring-2 focus:ring-accent"
         />
       </div>
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium">Kind</legend>
+        <div className="grid grid-cols-3 gap-2">
+          {(
+            [
+              ["task", "Task"],
+              ["exercise", "Exercise"],
+              ["workout", "Workout"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={kind === value}
+              onClick={() => setKind(value)}
+              className={`min-h-11 rounded-xl text-sm font-medium ${
+                kind === value ? "bg-accent text-white dark:text-neutral-950" : "bg-background"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </fieldset>
       <div>
         <label htmlFor="task-note" className="mb-1 block text-sm font-medium">
-          Note <span className="font-normal text-muted">(optional)</span>
+          {kind === "task" ? (
+            <>
+              Note <span className="font-normal text-muted">(optional)</span>
+            </>
+          ) : (
+            "Description"
+          )}
         </label>
         <textarea
           id="task-note"
@@ -512,9 +626,12 @@ function AddTaskForm({
           onChange={(event) => setNote(event.target.value)}
           rows={2}
           maxLength={1000}
-          placeholder="Details"
+          placeholder={kind === "task" ? "Details" : "30 min easy run"}
           className="w-full rounded-xl bg-background px-4 py-3 text-base outline-none focus:ring-2 focus:ring-accent"
         />
+        {kind === "task" ? null : (
+          <p className="mt-1 text-sm text-muted">Include the minutes, for example 30 min. This is saved as a workout.</p>
+        )}
       </div>
       <fieldset>
         <legend className="mb-2 text-sm font-medium">

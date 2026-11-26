@@ -1,6 +1,7 @@
 // Shared types. Keep in sync with supabase/migrations.
 
 export type Priority = "low" | "medium" | "high";
+export type TaskKind = "task" | "exercise" | "workout";
 
 export interface Task {
   id: string;
@@ -9,6 +10,7 @@ export interface Task {
   note: string | null;
   priority: Priority | null;
   task_date: string; // YYYY-MM-DD
+  kind: TaskKind;
   done: boolean;
   position: number;
   created_at: string;

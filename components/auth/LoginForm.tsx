@@ -7,11 +7,15 @@ import SetupNotice from "@/components/SetupNotice";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
-/** This personal app has one account. The password is what you choose in Supabase. */
-const ACCOUNT_EMAIL = "angekk419@gmail.com";
+const EMAIL_KEY = "daily-hub-email";
+const DEFAULT_EMAIL = "angekk419@gmail.com";
 
 function subscribe() {
   return () => {};
+}
+
+function readEmail(): string {
+  return localStorage.getItem(EMAIL_KEY) || DEFAULT_EMAIL;
 }
 
 function readLinkError(): string | null {
@@ -26,8 +30,11 @@ function readLinkError(): string | null {
 }
 
 function friendlyPasswordError(message: string): string {
-  if (/invalid login|invalid credentials|email not confirmed/i.test(message)) {
-    return "That password doesn't match.";
+  if (/invalid login|invalid credentials/i.test(message)) {
+    return "That email or password doesn't match.";
+  }
+  if (/email not confirmed/i.test(message)) {
+    return "That account is waiting for email confirmation. In Supabase, open Authentication, then Sign In / Providers, then Email, and turn off Confirm email. Then sign in again.";
   }
   return message;
 }
@@ -35,10 +42,15 @@ function friendlyPasswordError(message: string): string {
 export default function LoginForm() {
   const router = useRouter();
   const linkError = useSyncExternalStore(subscribe, readLinkError, () => null);
+  const remembered = useSyncExternalStore(subscribe, readEmail, () => "");
+  const [email, setEmail] = useState<string | null>(null);
+  const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const error = formError ?? linkError;
+  const emailValue = email ?? remembered;
 
   if (!isSupabaseConfigured()) {
     return (
@@ -49,8 +61,17 @@ export default function LoginForm() {
     );
   }
 
+  function remember(nextEmail: string) {
+    localStorage.setItem(EMAIL_KEY, nextEmail);
+  }
+
   async function signIn(event: React.FormEvent) {
     event.preventDefault();
+    const trimmed = emailValue.trim().toLowerCase();
+    if (!trimmed.includes("@")) {
+      setFormError("Enter an email address.");
+      return;
+    }
     if (password.length < 6) {
       setFormError("Use at least 6 characters.");
       return;
@@ -58,44 +79,115 @@ export default function LoginForm() {
 
     setSaving(true);
     setFormError(null);
-    const { error: signInError } = await createClient().auth.signInWithPassword({
-      email: ACCOUNT_EMAIL,
+    const supabase = createClient();
+    if (creating) {
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: trimmed,
+        password,
+        options: { data: { display_name: name.trim() } },
+      });
+      setSaving(false);
+      if (signUpError) {
+        setFormError(friendlyPasswordError(signUpError.message));
+        return;
+      }
+      remember(trimmed);
+      if (!data.session) {
+        setFormError(
+          "Account created. Supabase is still waiting to confirm the email. In the Supabase dashboard, open Authentication, then Sign In / Providers, then Email, and turn off Confirm email. Then sign in with this email and password.",
+        );
+        setCreating(false);
+        return;
+      }
+      router.push("/today");
+      router.refresh();
+      return;
+    }
+
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: trimmed,
       password,
     });
     setSaving(false);
-
     if (signInError) {
       setFormError(friendlyPasswordError(signInError.message));
       return;
     }
+    remember(trimmed);
     router.push("/today");
     router.refresh();
   }
 
   return (
     <>
-      <PageHeader title="Daily Hub" subtitle="Enter your password." />
-      <form onSubmit={signIn} className="rounded-2xl bg-card p-4 space-y-3">
-        <label htmlFor="password" className="block text-sm font-medium">
-          Password
-        </label>
-        <input
-          id="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          className="w-full min-h-12 rounded-xl bg-background px-4 text-base outline-none focus:ring-2 focus:ring-accent"
-        />
+      <PageHeader
+        title="Daily Hub"
+        subtitle={creating ? "Create your own account." : "Sign in with your email and password."}
+      />
+      <form onSubmit={signIn} className="space-y-3 rounded-2xl bg-card p-4">
+        {creating ? (
+          <div>
+            <label htmlFor="name" className="mb-1 block text-sm font-medium">
+              Name
+            </label>
+            <input
+              id="name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              autoComplete="name"
+              maxLength={40}
+              placeholder="Ada"
+              className="w-full min-h-12 rounded-xl bg-background px-4 text-base outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+        ) : null}
+        <div>
+          <label htmlFor="email" className="mb-1 block text-sm font-medium">
+            Email
+          </label>
+          <input
+            id="email"
+            type="email"
+            autoComplete="email"
+            required
+            value={emailValue}
+            onChange={(event) => setEmail(event.target.value)}
+            className="w-full min-h-12 rounded-xl bg-background px-4 text-base outline-none focus:ring-2 focus:ring-accent"
+          />
+        </div>
+        <div>
+          <label htmlFor="password" className="mb-1 block text-sm font-medium">
+            Password
+          </label>
+          <input
+            id="password"
+            type="password"
+            autoComplete={creating ? "new-password" : "current-password"}
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            className="w-full min-h-12 rounded-xl bg-background px-4 text-base outline-none focus:ring-2 focus:ring-accent"
+          />
+        </div>
         <button
           type="submit"
           disabled={saving}
           className="w-full min-h-12 rounded-xl bg-accent text-base font-semibold text-white disabled:opacity-60 dark:text-neutral-950"
         >
-          {saving ? "Signing in…" : "Sign in"}
+          {saving ? "Please wait…" : creating ? "Create account" : "Sign in"}
         </button>
       </form>
+
+      <button
+        type="button"
+        onClick={() => {
+          setCreating((open) => !open);
+          setFormError(null);
+        }}
+        className="mt-4 min-h-12 w-full text-sm font-medium text-accent"
+      >
+        {creating ? "I already have an account" : "Create an account"}
+      </button>
 
       {error ? (
         <p role="alert" className="mt-4 rounded-2xl bg-card px-4 py-3 text-sm text-red-600 dark:text-red-400">

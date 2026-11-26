@@ -3,7 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { Goal, GoalMetric } from "@/types";
 import { createClient } from "@/lib/supabase/client";
-import { toDayKey } from "@/lib/dates";
+import { addDays, parseDayKey, toDayKey } from "@/lib/dates";
 import {
   dailyShare,
   formatAmount,
@@ -70,14 +70,19 @@ async function loadGoals(metrics: GoalMetric[], today: string): Promise<{
     sessionsResult.error;
   if (error) throw error;
 
-  const empty = (): PeriodCounts => ({ today: 0, week: 0, month: 0 });
+  const weekKeys = Array.from({ length: 7 }, (_, index) => toDayKey(addDays(parseDayKey(week.start), index)));
+  const empty = (): PeriodCounts => ({ today: 0, week: 0, month: 0, weekDays: [0, 0, 0, 0, 0, 0, 0] });
   const counts = Object.fromEntries(metrics.map((metric) => [metric, empty()])) as Record<GoalMetric, PeriodCounts>;
 
   function add(metric: GoalMetric, day: string, amount: number) {
     const bucket = counts[metric];
     if (!bucket || amount <= 0) return;
     if (day === today) bucket.today += amount;
-    if (inDayRange(day, week.start, week.end)) bucket.week += amount;
+    if (inDayRange(day, week.start, week.end)) {
+      bucket.week += amount;
+      const index = weekKeys.indexOf(day);
+      if (index >= 0) bucket.weekDays[index] += amount;
+    }
     if (inDayRange(day, month.start, month.end)) bucket.month += amount;
   }
 
@@ -106,12 +111,18 @@ async function loadGoals(metrics: GoalMetric[], today: string): Promise<{
   };
 }
 
-export default function GoalBoard({ metrics }: { metrics: GoalMetric[] }) {
+export default function GoalBoard({
+  metrics,
+  charts = false,
+}: {
+  metrics: GoalMetric[];
+  charts?: boolean;
+}) {
   const todayKey = useSyncExternalStore(subscribe, toDayKey, () => "");
   const [goals, setGoals] = useState<Goal[]>([]);
   const [counts, setCounts] = useState<Record<GoalMetric, PeriodCounts> | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState<GoalMetric[] | null>(null);
   const [saving, setSaving] = useState(false);
 
   const metricKey = metrics.join(",");
@@ -149,7 +160,7 @@ export default function GoalBoard({ metrics }: { metrics: GoalMetric[] }) {
       const supabase = createClient();
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData.user) throw new Error("Your session expired. Sign in again.");
-      for (const metric of metrics) {
+      for (const metric of Object.keys(drafts) as GoalMetric[]) {
         const weekly = parseTarget(drafts[metric].weekly);
         const monthly = parseTarget(drafts[metric].monthly);
         if (weekly == null && monthly == null) {
@@ -173,7 +184,7 @@ export default function GoalBoard({ metrics }: { metrics: GoalMetric[] }) {
         setGoals(loaded.goals);
         setCounts(loaded.counts);
       }
-      setEditing(false);
+      setEditing(null);
     } catch (saveError) {
       const message =
         saveError && typeof saveError === "object" && "message" in saveError
@@ -189,28 +200,47 @@ export default function GoalBoard({ metrics }: { metrics: GoalMetric[] }) {
   const month = monthBounds(todayKey);
   const week = weekBounds(todayKey);
 
-  return (
-    <section className="mb-5 rounded-2xl border border-black/10 bg-card p-4 dark:border-white/10">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Goals</h2>
-          <p className="mt-1 text-sm text-muted">Today, this week, and this month.</p>
-        </div>
+  if (!charts) {
+    return (
+      <section className="mb-5">
         <button
           type="button"
-          onClick={() => setEditing((open) => !open)}
-          className="min-h-11 shrink-0 text-sm font-medium text-accent"
+          onClick={() => setEditing((current) => (current ? null : metrics))}
+          className="min-h-12 w-full rounded-xl bg-card text-sm font-semibold"
         >
-          {editing ? "Close" : "Set goals"}
+          {editing ? "Close goals" : "Weekly and monthly goals"}
         </button>
+        {error ? <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
+        {editing ? (
+          <div className="mt-3 rounded-2xl bg-card p-4">
+            <GoalEditor key={editing.join(",")} metrics={editing} goals={goals} saving={saving} onSave={save} />
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  return (
+    <section className="mb-5 space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Progress</h2>
+        <p className="mt-1 text-sm text-muted">Today, this week, and this month against your goals.</p>
       </div>
-
-      {error ? <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
-
+      {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
       {editing ? (
-        <GoalEditor metrics={metrics} goals={goals} saving={saving} onSave={save} />
-      ) : counts ? (
-        <div className="mt-4 space-y-4">
+        <div className="rounded-2xl bg-card p-4">
+          <button
+            type="button"
+            onClick={() => setEditing(null)}
+            className="mb-3 min-h-11 text-sm font-medium text-accent"
+          >
+            Close
+          </button>
+          <GoalEditor key={editing.join(",")} metrics={editing} goals={goals} saving={saving} onSave={save} />
+        </div>
+      ) : null}
+      {counts ? (
+        <div className="space-y-3">
           {metrics.map((metric) => {
             const goal = goals.find((item) => item.metric === metric);
             const count = counts[metric];
@@ -224,12 +254,15 @@ export default function GoalBoard({ metrics }: { metrics: GoalMetric[] }) {
                 weekDay={week.day}
                 monthDay={month.day}
                 monthDays={month.days}
+                onEdit={() =>
+                  setEditing((current) => (current?.length === 1 && current[0] === metric ? null : [metric]))
+                }
               />
             );
           })}
         </div>
       ) : (
-        <div className="mt-4 h-20 animate-pulse rounded-xl bg-background" />
+        <div className="h-24 animate-pulse rounded-2xl bg-card" />
       )}
     </section>
   );
@@ -333,6 +366,7 @@ function MetricCard({
   weekDay,
   monthDay,
   monthDays,
+  onEdit,
 }: {
   metric: GoalMetric;
   weeklyTarget: number | null;
@@ -341,21 +375,44 @@ function MetricCard({
   weekDay: number;
   monthDay: number;
   monthDays: number;
+  onEdit: () => void;
 }) {
   const weekShare = dailyShare(weeklyTarget, 7);
   const monthShare = dailyShare(monthlyTarget, monthDays);
   const hasGoal = weeklyTarget != null || monthlyTarget != null;
+  const peak = Math.max(weekShare ?? 0, ...count.weekDays, 1);
+  const dayLabels = ["M", "T", "W", "T", "F", "S", "S"];
 
   return (
-    <article className="rounded-xl bg-background p-3">
-      <h3 className="font-semibold">{metricLabel(metric)}</h3>
+    <article className="rounded-2xl bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="font-semibold">{metricLabel(metric)}</h3>
+        <button type="button" onClick={onEdit} className="min-h-11 shrink-0 text-sm font-medium text-accent">
+          Goals
+        </button>
+      </div>
       {hasGoal ? (
-        <p className="mt-1 text-sm text-muted">
-          {shareSentence(metric, weekShare, monthShare)}
-        </p>
+        <p className="mt-1 text-sm text-muted">{shareSentence(metric, weekShare, monthShare)}</p>
       ) : (
-        <p className="mt-1 text-sm text-muted">Set a weekly and a monthly number.</p>
+        <p className="mt-1 text-sm text-muted">Add a weekly and a monthly goal.</p>
       )}
+      <div className="mt-4 flex h-24 items-end gap-1" aria-hidden>
+        {count.weekDays.map((amount, index) => {
+          const height = Math.round((amount / peak) * 100);
+          const met = weekShare != null && amount + 0.05 >= weekShare;
+          return (
+            <div key={dayLabels[index] + index} className="flex flex-1 flex-col items-center gap-1">
+              <div className="flex h-16 w-full items-end">
+                <div
+                  className={`w-full rounded-sm ${amount === 0 ? "bg-foreground/15" : met ? "bg-accent" : "bg-accent/60"}`}
+                  style={{ height: `${Math.max(height, amount > 0 ? 8 : 4)}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-muted">{dayLabels[index]}</span>
+            </div>
+          );
+        })}
+      </div>
       <div className="mt-3 grid grid-cols-3 gap-2">
         <Column
           label="Today"

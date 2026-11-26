@@ -130,7 +130,10 @@ export async function POST(request: Request) {
     return json({ tips: cached.tips, cached: true, monthCents: cached.monthCents });
   }
 
-  const apiKey = process.env.AI_API_KEY?.trim() ?? "";
+  const stored = await supabase.from("user_settings").select("openai_api_key").maybeSingle();
+  const storedKey =
+    stored.error || typeof stored.data?.openai_api_key !== "string" ? "" : stored.data.openai_api_key.trim();
+  const apiKey = process.env.AI_API_KEY?.trim() || storedKey;
   if (!apiKey) {
     return json(
       {
@@ -139,7 +142,7 @@ export async function POST(request: Request) {
         monthCents: cached.monthCents,
         code: "missing_key",
         error:
-          "Add an OpenAI key named AI_API_KEY on Vercel (and in .env.local on this computer) to turn the coach on. The app uses gpt-4o-mini and stops at $5 per month.",
+          "Add your OpenAI key in the box under Weekly insight. The app uses gpt-4o-mini and stops at $5 per month.",
       },
       200,
     );
@@ -254,7 +257,7 @@ export async function POST(request: Request) {
     const detail = (await upstream.json().catch(() => null)) as { error?: { message?: string } } | null;
     const message =
       upstream.status === 401
-        ? "OpenAI rejected AI_API_KEY. Check the key on Vercel and in .env.local."
+        ? "OpenAI rejected that key. Check it and save it again."
         : (detail?.error?.message ?? "The coach did not answer. Try again in a minute.");
     return json({ error: message }, 502);
   }

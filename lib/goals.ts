@@ -20,6 +20,7 @@ export interface PeriodCounts {
   today: number;
   week: number;
   month: number;
+  weekDays: number[];
 }
 
 export function monthBounds(todayKey: string): { start: string; end: string; days: number; day: number } {
