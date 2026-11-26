@@ -95,12 +95,8 @@ export default function CoachChat({ today }: { today: string }) {
           </button>
         ) : null}
       </div>
-      <p className="mt-1 text-sm text-muted">Uses your own week, not anyone else’s. The family shares a $5 monthly limit.</p>
       <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
         {loading ? <div className="h-16 animate-pulse rounded-xl bg-background" /> : null}
-        {!loading && messages.length === 0 ? (
-          <p className="text-sm text-muted">Ask about your week, a workout, a book, or a habit.</p>
-        ) : null}
         {messages.map((message) => (
           <p
             key={message.id}

@@ -65,7 +65,7 @@ export function overCap(cents: number): boolean {
 
 export const CAP_MESSAGE = "The family coach has reached the $5 limit for this month. It will work again next month.";
 export const MISSING_KEY_MESSAGE =
-  "The family OpenAI key is not set yet. The person who started the family adds it once under Summary.";
+  "The coach is not set up on this website yet. Add the key in the website settings, then publish again.";
 export const NEEDS_SERVER_MESSAGE =
   "The family key is saved. Add the Supabase secret key on the server so everyone can use the coach.";
 
