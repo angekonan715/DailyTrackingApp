@@ -74,7 +74,8 @@ export default function DailyQuote({
 
   return (
     <section className={`rounded-2xl bg-card px-4 py-3 ${className}`.trim()}>
-      <p className="text-sm leading-6">“{quote}”</p>
+      <p className="text-xs font-medium text-muted">For today</p>
+      <p className="mt-1 text-base leading-6">“{quote}”</p>
       <p className="mt-1 text-xs text-muted">{author}</p>
     </section>
   );

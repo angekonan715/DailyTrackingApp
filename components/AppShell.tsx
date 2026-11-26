@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
+import FloatingCoach from "@/components/FloatingCoach";
 import InstallPrompt, { useInstallVisible } from "@/components/InstallPrompt";
 
 export default function AppShell({ children }: { children: ReactNode }) {
@@ -20,6 +21,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         {children}
       </main>
       <InstallPrompt aboveNav={showNav} />
+      {showNav ? <FloatingCoach /> : null}
       {showNav ? <BottomNav /> : null}
     </>
   );

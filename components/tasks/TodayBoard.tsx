@@ -405,6 +405,7 @@ function TaskScreen() {
   if (focusToday) {
     return (
       <>
+        {todayKey ? <DailyQuote today={todayKey} quiet className="mb-4" /> : null}
         <header className="mb-5 flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Today</h1>
@@ -421,7 +422,6 @@ function TaskScreen() {
             <SignOutButton />
           </div>
         </header>
-        {todayKey ? <DailyQuote today={todayKey} quiet className="mb-4" /> : null}
         {error ? (
           <div role="alert" className="mb-4 rounded-2xl bg-card px-4 py-3 text-sm">
             <p className="text-red-600 dark:text-red-400">{error}</p>
@@ -438,6 +438,7 @@ function TaskScreen() {
 
   return (
     <>
+      {viewingToday && todayKey ? <DailyQuote today={todayKey} quiet className="mb-4" /> : null}
       <div className="mb-6" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <div className="flex justify-end">
           <SignOutButton />
@@ -503,8 +504,6 @@ function TaskScreen() {
           <div className="h-full bg-accent transition-[width]" style={{ width: `${percent}%` }} />
         </div>
       </div>
-
-      {viewingToday && todayKey ? <DailyQuote today={todayKey} quiet className="mb-4" /> : null}
 
       {viewingToday ? (
         <button
