@@ -47,3 +47,18 @@ export function formatLongDate(key: string): string {
     day: "numeric",
   });
 }
+
+/** Days in a row present in `days`. Today still counts as open until it ends. */
+export function dayStreak(days: Iterable<string>, today = new Date()): number {
+  const set = days instanceof Set ? days : new Set(days);
+  let cursor = new Date(today);
+  cursor.setHours(0, 0, 0, 0);
+  if (!set.has(toDayKey(cursor))) cursor = addDays(cursor, -1);
+
+  let streak = 0;
+  while (set.has(toDayKey(cursor))) {
+    streak += 1;
+    cursor = addDays(cursor, -1);
+  }
+  return streak;
+}

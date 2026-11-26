@@ -59,3 +59,16 @@ export interface ReadingSession {
   day: string; // YYYY-MM-DD
   pages_read: number;
 }
+
+export interface WeeklyInsight {
+  user_id: string;
+  week_start: string; // Monday, YYYY-MM-DD
+  tips: string[];
+  created_at: string;
+}
+
+export interface AiUsage {
+  user_id: string;
+  month: string; // YYYY-MM
+  cost_cents: number;
+}
