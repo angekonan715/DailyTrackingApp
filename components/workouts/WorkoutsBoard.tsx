@@ -188,8 +188,6 @@ function WorkoutScreen() {
         }
       />
 
-      <GoalBoard metrics={["workout_minutes", "workouts"]} />
-
       {formMode ? (
         <WorkoutForm
           key={formMode === "new" ? "new" : formMode.id}
@@ -211,6 +209,8 @@ function WorkoutScreen() {
           Log a workout
         </button>
       )}
+
+      <GoalBoard metrics={["workout_minutes", "workouts"]} />
 
       {error ? (
         <div role="alert" className="mb-4 rounded-2xl bg-card px-4 py-3 text-sm">

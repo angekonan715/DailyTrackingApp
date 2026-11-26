@@ -15,12 +15,7 @@ alter table public.household_invites enable row level security;
 
 drop policy if exists "member_select" on public.household_invites;
 create policy "member_select" on public.household_invites for select
-  using (
-    exists (
-      select 1 from public.household_members me
-      where me.household_id = household_invites.household_id and me.user_id = auth.uid()
-    )
-  );
+  using (public.is_household_member(household_id));
 
 grant select, insert, update, delete on public.household_invites to authenticated;
 

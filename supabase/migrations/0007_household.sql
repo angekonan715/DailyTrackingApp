@@ -23,14 +23,40 @@ create unique index if not exists household_members_user on public.household_mem
 alter table public.households enable row level security;
 alter table public.household_members enable row level security;
 
+create or replace function public.is_household_member(target_household uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.household_members
+    where household_id = target_household and user_id = auth.uid()
+  );
+$$;
+
+revoke all on function public.is_household_member(uuid) from public;
+grant execute on function public.is_household_member(uuid) to authenticated;
+
+create or replace function public.already_has_household()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.household_members where user_id = auth.uid()
+  );
+$$;
+
+revoke all on function public.already_has_household() from public;
+grant execute on function public.already_has_household() to authenticated;
+
 drop policy if exists "member_select" on public.households;
 create policy "member_select" on public.households for select
-  using (
-    exists (
-      select 1 from public.household_members me
-      where me.household_id = households.id and me.user_id = auth.uid()
-    )
-  );
+  using (created_by = auth.uid() or public.is_household_member(id));
 
 drop policy if exists "create_own" on public.households;
 create policy "create_own" on public.households for insert
@@ -38,12 +64,7 @@ create policy "create_own" on public.households for insert
 
 drop policy if exists "member_select" on public.household_members;
 create policy "member_select" on public.household_members for select
-  using (
-    exists (
-      select 1 from public.household_members me
-      where me.household_id = household_members.household_id and me.user_id = auth.uid()
-    )
-  );
+  using (user_id = auth.uid() or public.is_household_member(household_id));
 
 drop policy if exists "join_own_household" on public.household_members;
 create policy "join_own_household" on public.household_members for insert
@@ -53,10 +74,7 @@ create policy "join_own_household" on public.household_members for insert
       select 1 from public.households house
       where house.id = household_id and house.created_by = auth.uid()
     )
-    and not exists (
-      select 1 from public.household_members existing
-      where existing.user_id = auth.uid()
-    )
+    and not public.already_has_household()
   );
 
 drop policy if exists "own_update" on public.household_members;

@@ -83,3 +83,20 @@ export interface Goal {
   weekly_target: number | null;
   monthly_target: number | null;
 }
+
+export interface Hobby {
+  id: string;
+  user_id: string;
+  name: string;
+  note: string | null;
+  created_at: string;
+}
+
+export interface HobbySession {
+  id: string;
+  user_id: string;
+  hobby_id: string;
+  day: string;
+  note: string | null;
+  created_at: string;
+}

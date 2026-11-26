@@ -12,6 +12,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { addDays, formatLongDate, parseDayKey, relativeDayLabel, toDayKey } from "@/lib/dates";
 import { sortTasks } from "@/lib/tasks";
 import { workoutFromTask } from "@/lib/task-workout";
+import QuickWorkout from "@/components/workouts/QuickWorkout";
 import { carriedOnServer, readCarried, rememberCarried, subscribeCarried } from "@/lib/carried";
 
 function subscribe() {
@@ -103,7 +104,7 @@ function TaskScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [carrying, setCarrying] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [todoOnly, setTodoOnly] = useState(true);
+  const [todoOnly, setTodoOnly] = useState(false);
   const savedPositions = useRef(new Map<string, number>());
   const touch = useRef<{ x: number; y: number } | null>(null);
   const remember = useCallback((list: Task[]) => {
@@ -427,6 +428,7 @@ function TaskScreen() {
             </button>
           </div>
         ) : null}
+        <QuickWorkout />
         {list}
       </>
     );
@@ -524,6 +526,8 @@ function TaskScreen() {
       >
         Today only
       </button>
+
+      <QuickWorkout />
 
       {notice ? (
         <p role="status" className="mb-4 text-sm text-muted">
