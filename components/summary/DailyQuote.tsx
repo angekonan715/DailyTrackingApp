@@ -56,9 +56,8 @@ export default function DailyQuote({
           setAuthor(next.author ?? "Daily Hub");
           return;
         }
-        if (quiet) return;
-        if (next.code === "missing_key") setNote("A daily quote shows here after the family key is saved.");
-        else setNote(next.error ?? null);
+        if (quiet || next.code === "missing_key" || next.code === "needs_server") return;
+        setNote(next.error ?? null);
       } catch {
         if (!cancelled && !quiet) setNote("The daily quote did not load.");
       }
