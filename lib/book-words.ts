@@ -14,19 +14,11 @@ function missingTable(message: string): boolean {
 
 export const WORD_NOTES_FOLDER = "Word notes";
 
-function wordBlock(word: string, definition: string, example: string, searchedOn: string): string {
-  return `${word.trim()}\nSearched ${formatLongDate(searchedOn)}\n${definition.trim()}\nExample: ${example.trim()}`;
-}
-
 function blocks(body: string): string[] {
   return body
     .split(/\n{2,}/)
     .map((part) => part.trim())
     .filter(Boolean);
-}
-
-function sameWord(block: string, word: string): boolean {
-  return (block.split("\n")[0] ?? "").trim().toLowerCase() === word.trim().toLowerCase();
 }
 
 function escapeHtml(value: string): string {
@@ -41,17 +33,60 @@ function looksFormatted(body: string): boolean {
   return /<\/?[a-z][\s\S]*>/i.test(body);
 }
 
-function wordHtml(word: string, definition: string, example: string, searchedOn: string): string {
-  return `<h2>${escapeHtml(word.trim())}</h2><p>Searched ${escapeHtml(formatLongDate(searchedOn))}</p><p>${escapeHtml(definition.trim())}</p><p>Example: ${escapeHtml(example.trim())}</p>`;
+function entryHtml(word: string, definition: string, example: string, searchedLabel: string): string {
+  return [
+    `<h2><strong>${escapeHtml(word.trim())}</strong></h2>`,
+    `<p><em>${escapeHtml(searchedLabel)}</em></p>`,
+    `<p>${escapeHtml(definition.trim())}</p>`,
+    `<p><strong>Example.</strong> ${escapeHtml(example.trim())}</p>`,
+  ].join("");
 }
 
-function savedDate(block: string, fallback: string): string {
+function headingPattern(word: string): RegExp {
+  const name = escapePattern(word.trim());
+  return new RegExp(
+    `<h2>\\s*(?:<strong>)?\\s*${name}\\s*(?:</strong>)?\\s*</h2>[\\s\\S]*?(?=<h2>|$)`,
+    "i",
+  );
+}
+
+function paragraphPattern(word: string): RegExp {
+  const name = escapePattern(word.trim());
+  return new RegExp(
+    `<p>\\s*(?:<strong>)?\\s*${name}\\s*(?:</strong>)?\\s*</p>\\s*<p>[\\s\\S]*?</p>\\s*<p>[\\s\\S]*?Example[\\s\\S]*?</p>`,
+    "i",
+  );
+}
+
+function savedLabel(block: string, fallback: string): string {
   const line = block
     .replace(/<[^>]+>/g, "\n")
     .split("\n")
     .map((part) => part.trim())
     .find((part) => /^searched\s+/i.test(part));
-  return line ? line.replace(/^searched\s+/i, "Searched ") : `Searched ${formatLongDate(fallback)}`;
+  if (!line) return `Searched ${formatLongDate(fallback)}`;
+  return /^searched\s+/i.test(line) ? line.replace(/^searched/i, "Searched") : line;
+}
+
+function plainEntryToHtml(block: string): string {
+  const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return "";
+  const word = lines[0] ?? "";
+  let searched = "";
+  let example = "";
+  const meaning: string[] = [];
+  for (const line of lines.slice(1)) {
+    if (/^searched\s+/i.test(line)) searched = line.replace(/^searched/i, "Searched");
+    else if (/^example[.:]\s*/i.test(line)) example = line.replace(/^example[.:]\s*/i, "");
+    else meaning.push(line);
+  }
+  return entryHtml(word, meaning.join(" "), example, searched || "Searched earlier");
+}
+
+function asHtml(body: string): string {
+  if (!body.trim()) return "";
+  if (looksFormatted(body)) return body;
+  return blocks(body).map(plainEntryToHtml).join("");
 }
 
 export function upsertWordEntry(
@@ -62,40 +97,17 @@ export function upsertWordEntry(
   searchedOn: string,
   keepDate = false,
 ): string {
-  if (looksFormatted(body)) {
-    const pattern = new RegExp(`<h2>\\s*${escapePattern(word.trim())}\\s*</h2>[\\s\\S]*?(?=<h2>|$)`, "i");
-    const plain = new RegExp(
-      `<p>\\s*${escapePattern(word.trim())}\\s*</p>\\s*<p>[\\s\\S]*?</p>\\s*<p>\\s*Example:[\\s\\S]*?</p>`,
-      "i",
-    );
-    const current = body.match(pattern)?.[0] ?? "";
-    const dated = keepDate && current ? wordHtml(word, definition, example, searchedOn).replace(/<p>Searched [^<]*<\/p>/, `<p>${escapeHtml(savedDate(current, searchedOn))}</p>`) : wordHtml(word, definition, example, searchedOn);
-    const cleared = body.replace(pattern, "").replace(plain, "").trim();
-    return `${dated}${cleared}`.slice(0, 40000);
-  }
-  const parts = blocks(body);
-  const index = parts.findIndex((part) => sameWord(part, word));
-  const next =
-    keepDate && index >= 0
-      ? `${word.trim()}\n${savedDate(parts[index] ?? "", searchedOn)}\n${definition.trim()}\nExample: ${example.trim()}`
-      : wordBlock(word, definition, example, searchedOn);
-  if (index >= 0) parts.splice(index, 1);
-  parts.unshift(next);
-  return parts.join("\n\n").slice(0, 40000);
+  const html = asHtml(body);
+  const pattern = headingPattern(word);
+  const current = html.match(pattern)?.[0] ?? html.match(paragraphPattern(word))?.[0] ?? "";
+  const label = keepDate && current ? savedLabel(current, searchedOn) : `Searched ${formatLongDate(searchedOn)}`;
+  const cleared = html.replace(pattern, "").replace(paragraphPattern(word), "").trim();
+  return `${entryHtml(word, definition, example, label)}${cleared}`.slice(0, 40000);
 }
 
 export function removeWordEntry(body: string, word: string): string {
-  if (looksFormatted(body)) {
-    const pattern = new RegExp(`<h2>\\s*${escapePattern(word.trim())}\\s*</h2>[\\s\\S]*?(?=<h2>|$)`, "i");
-    const plain = new RegExp(
-      `<p>\\s*${escapePattern(word.trim())}\\s*</p>\\s*<p>[\\s\\S]*?</p>\\s*<p>\\s*Example:[\\s\\S]*?</p>`,
-      "i",
-    );
-    return body.replace(pattern, "").replace(plain, "").trim().slice(0, 40000);
-  }
-  return blocks(body)
-    .filter((part) => !sameWord(part, word))
-    .join("\n\n");
+  const html = asHtml(body);
+  return html.replace(headingPattern(word), "").replace(paragraphPattern(word), "").trim().slice(0, 40000);
 }
 
 async function wordNotesFolder(supabase: SupabaseClient): Promise<string | null> {

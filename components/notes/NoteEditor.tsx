@@ -243,7 +243,7 @@ export default function NoteEditor({
             contentEditable
             suppressContentEditableWarning
             onInput={capture}
-            className="min-h-[58vh] w-full text-lg leading-8 outline-none [&_h2]:mt-4 [&_h2]:text-xl [&_h2]:font-bold [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6"
+            className="min-h-[58vh] w-full text-lg leading-8 outline-none [&_em]:text-slate-500 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-bold [&_h2:not(:first-child)]:border-t [&_h2:not(:first-child)]:border-slate-200 [&_h2:not(:first-child)]:pt-4 [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_strong]:font-bold [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6"
           />
         </div>
       </section>
