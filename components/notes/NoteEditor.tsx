@@ -30,9 +30,11 @@ export default function NoteEditor({
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const paper = useRef<HTMLDivElement | null>(null);
   const ready = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ title: "", body: "" });
+  const [marks, setMarks] = useState({ bold: false, italic: false });
   const [home, setHome] = useState(folderId ?? "");
 
   useEffect(() => {
@@ -55,6 +57,7 @@ export default function NoteEditor({
       latest.current = { title: nextTitle, body: nextBody };
       setTitle(nextTitle);
       setBody(nextBody);
+      if (paper.current) paper.current.innerHTML = editorHtml(nextBody);
       ready.current = true;
       setStatus("Saved");
     }
@@ -74,6 +77,41 @@ export default function NoteEditor({
         .eq("id", noteId);
     };
   }, [noteId]);
+
+  useEffect(() => {
+    function sync() {
+      const page = paper.current;
+      const selection = document.getSelection();
+      if (!page || !selection?.anchorNode || !page.contains(selection.anchorNode)) return;
+      try {
+        setMarks({
+          bold: document.queryCommandState("bold"),
+          italic: document.queryCommandState("italic"),
+        });
+      } catch {
+        setMarks({ bold: false, italic: false });
+      }
+    }
+    document.addEventListener("selectionchange", sync);
+    return () => document.removeEventListener("selectionchange", sync);
+  }, []);
+
+  function capture() {
+    const html = sanitizeNoteHtml(paper.current?.innerHTML ?? "");
+    setBody(html);
+    if (ready.current) schedule(latest.current.title, html);
+  }
+
+  function apply(command: string, value?: string) {
+    paper.current?.focus();
+    document.execCommand(command, false, value);
+    capture();
+  }
+
+  function heading() {
+    const current = document.queryCommandValue("formatBlock");
+    apply("formatBlock", /h2/i.test(current) ? "P" : "H2");
+  }
 
   function schedule(nextTitle: string, nextBody: string) {
     latest.current = { title: nextTitle, body: nextBody };
@@ -156,21 +194,38 @@ export default function NoteEditor({
           placeholder="Title"
           className="mt-1 w-full bg-transparent text-2xl font-semibold outline-none placeholder:text-slate-400"
         />
-        <label className="sr-only" htmlFor="note-body">
-          Note
-        </label>
-        <textarea
-          id="note-body"
-          value={body}
-          onChange={(event) => {
-            const next = event.target.value;
-            setBody(next);
-            if (ready.current) schedule(latest.current.title, next);
-          }}
-          maxLength={40000}
-          placeholder="Write here"
-          className="mt-4 min-h-[58vh] w-full resize-none bg-transparent text-lg leading-8 outline-none placeholder:text-slate-400"
-        />
+        <div className="sticky top-0 z-10 -mx-5 mt-4 flex gap-1 border-y border-slate-200 bg-[#fffdf8] px-3 py-2">
+          <ToolButton label="Heading" pressed={false} onPress={heading}>
+            H
+          </ToolButton>
+          <ToolButton label="Bold" pressed={marks.bold} onPress={() => apply("bold")}>
+            <span className="font-bold">B</span>
+          </ToolButton>
+          <ToolButton label="Italic" pressed={marks.italic} onPress={() => apply("italic")}>
+            <span className="italic">I</span>
+          </ToolButton>
+          <ToolButton label="Bullet list" pressed={false} onPress={() => apply("insertUnorderedList")}>
+            •
+          </ToolButton>
+          <ToolButton label="Numbered list" pressed={false} onPress={() => apply("insertOrderedList")}>
+            1.
+          </ToolButton>
+        </div>
+        <div className="relative mt-3">
+          {visibleText(body).length === 0 ? (
+            <span className="pointer-events-none absolute text-lg text-slate-400">Write here</span>
+          ) : null}
+          <div
+            ref={paper}
+            role="textbox"
+            aria-multiline="true"
+            aria-label="Note"
+            contentEditable
+            suppressContentEditableWarning
+            onInput={capture}
+            className="min-h-[58vh] w-full text-lg leading-8 outline-none [&_h2]:mt-4 [&_h2]:text-xl [&_h2]:font-bold [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6"
+          />
+        </div>
       </section>
       {folders ? (
         <label className="mt-4 block text-sm font-medium">
@@ -208,4 +263,78 @@ export default function NoteEditor({
       </div>
     </div>
   );
+}
+
+function ToolButton({
+  label,
+  pressed,
+  onPress,
+  children,
+}: {
+  label: string;
+  pressed: boolean;
+  onPress: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={pressed}
+      onPointerDown={(event) => event.preventDefault()}
+      onClick={onPress}
+      className={`flex h-11 min-w-11 items-center justify-center rounded-xl px-3 text-base text-slate-800 ${
+        pressed ? "bg-slate-200" : "bg-transparent"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function plainToHtml(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => `<p>${escapeHtml(part).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+const ALLOWED = new Set(["P", "BR", "STRONG", "EM", "U", "H2", "UL", "OL", "LI"]);
+
+function sanitizeNoteHtml(html: string): string {
+  if (!html.trim() || typeof DOMParser === "undefined") return "";
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return [...doc.body.childNodes].map(cleanNode).join("").slice(0, 40000);
+}
+
+function cleanNode(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return escapeHtml(node.textContent ?? "");
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const el = node as HTMLElement;
+  let tag = el.tagName;
+  if (tag === "DIV") tag = "P";
+  if (tag === "B") tag = "STRONG";
+  if (tag === "I") tag = "EM";
+  if (tag === "H1" || tag === "H3" || tag === "H4") tag = "H2";
+  if (tag === "BR") return "<br>";
+  const inner = [...el.childNodes].map(cleanNode).join("");
+  if (!ALLOWED.has(tag)) return inner;
+  if ((tag === "P" || tag === "H2" || tag === "LI") && inner.replace(/<br>/g, "").trim() === "") return "";
+  return `<${tag.toLowerCase()}>${inner}</${tag.toLowerCase()}>`;
+}
+
+function editorHtml(stored: string): string {
+  if (!stored.trim()) return "";
+  if (/<\/?[a-z][\s\S]*>/i.test(stored)) return sanitizeNoteHtml(stored);
+  return plainToHtml(stored);
+}
+
+function visibleText(html: string): string {
+  return html.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
 }

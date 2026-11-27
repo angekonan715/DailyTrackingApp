@@ -28,7 +28,33 @@ function sameWord(block: string, word: string): boolean {
   return (block.split("\n")[0] ?? "").trim().toLowerCase() === word.trim().toLowerCase();
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapePattern(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function looksFormatted(body: string): boolean {
+  return /<\/?[a-z][\s\S]*>/i.test(body);
+}
+
+function wordHtml(word: string, definition: string, example: string): string {
+  return `<h2>${escapeHtml(word.trim())}</h2><p>${escapeHtml(definition.trim())}</p><p>Example: ${escapeHtml(example.trim())}</p>`;
+}
+
 export function upsertWordEntry(body: string, word: string, definition: string, example: string): string {
+  if (looksFormatted(body)) {
+    const next = wordHtml(word, definition, example);
+    const pattern = new RegExp(`<h2>\\s*${escapePattern(word.trim())}\\s*</h2>[\\s\\S]*?(?=<h2>|$)`, "i");
+    const plain = new RegExp(
+      `<p>\\s*${escapePattern(word.trim())}\\s*</p>\\s*<p>[\\s\\S]*?</p>\\s*<p>\\s*Example:[\\s\\S]*?</p>`,
+      "i",
+    );
+    const cleared = body.replace(pattern, "").replace(plain, "").trim();
+    return `${next}${cleared}`.slice(0, 40000);
+  }
   const next = wordBlock(word, definition, example);
   const parts = blocks(body);
   const index = parts.findIndex((part) => sameWord(part, word));
@@ -38,6 +64,14 @@ export function upsertWordEntry(body: string, word: string, definition: string, 
 }
 
 export function removeWordEntry(body: string, word: string): string {
+  if (looksFormatted(body)) {
+    const pattern = new RegExp(`<h2>\\s*${escapePattern(word.trim())}\\s*</h2>[\\s\\S]*?(?=<h2>|$)`, "i");
+    const plain = new RegExp(
+      `<p>\\s*${escapePattern(word.trim())}\\s*</p>\\s*<p>[\\s\\S]*?</p>\\s*<p>\\s*Example:[\\s\\S]*?</p>`,
+      "i",
+    );
+    return body.replace(pattern, "").replace(plain, "").trim().slice(0, 40000);
+  }
   return blocks(body)
     .filter((part) => !sameWord(part, word))
     .join("\n\n");

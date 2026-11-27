@@ -48,17 +48,29 @@ function folderLabel(folders: Map<string, FolderRow>, id: string | null): string
   return names.join(" / ");
 }
 
+function readable(body: string): string {
+  return body
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function excerpt(body: string, words: string[]): string {
-  const lower = body.toLowerCase();
+  const plain = readable(body);
+  const lower = plain.toLowerCase();
   let at = -1;
   for (const word of words) {
     const index = lower.indexOf(word);
     if (index >= 0 && (at < 0 || index < at)) at = index;
   }
-  if (at < 0) return body.slice(0, 700);
+  if (at < 0) return plain.slice(0, 700);
   const start = Math.max(0, at - 160);
-  const slice = body.slice(start, start + 800).trim();
-  return `${start > 0 ? "…" : ""}${slice}${start + 800 < body.length ? "…" : ""}`;
+  const slice = plain.slice(start, start + 800).trim();
+  return `${start > 0 ? "…" : ""}${slice}${start + 800 < plain.length ? "…" : ""}`;
 }
 
 function place(note: NoteRow, folders: Map<string, FolderRow>, books: Map<string, string>): string {
@@ -106,7 +118,7 @@ export async function loadNoteContext(supabase: SupabaseClient, message: string)
   const ranked = found
     .map((note) => {
       const title = (note.title ?? "").toLowerCase();
-      const body = (note.body ?? "").toLowerCase();
+      const body = readable(note.body ?? "").toLowerCase();
       const score = words.reduce((total, word) => total + (title.includes(word) ? 5 : 0) + (body.includes(word) ? 2 : 0), 0);
       return { note, score };
     })
@@ -123,7 +135,7 @@ export async function loadNoteContext(supabase: SupabaseClient, message: string)
     .filter((note) => !matchedIds.has(note.id))
     .slice(0, 6)
     .map((note) => {
-      const preview = (note.body ?? "").replace(/\s+/g, " ").trim().slice(0, 220);
+      const preview = readable(note.body ?? "").slice(0, 220);
       return `- ${note.title?.trim() || "Untitled"} (${place(note, folders, books)}): ${preview || "Empty note."}`;
     });
   const closest = ranked.map(({ note }) => {
