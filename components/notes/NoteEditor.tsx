@@ -32,6 +32,7 @@ export default function NoteEditor({
   const [confirming, setConfirming] = useState(false);
   const [removing, setRemoving] = useState(false);
   const paper = useRef<HTMLDivElement | null>(null);
+  const savedRange = useRef<Range | null>(null);
   const ready = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ title: "", body: "" });
@@ -85,6 +86,7 @@ export default function NoteEditor({
       const page = paper.current;
       const selection = document.getSelection();
       if (!page || !selection?.anchorNode || !page.contains(selection.anchorNode)) return;
+      if (selection.rangeCount > 0) savedRange.current = selection.getRangeAt(0).cloneRange();
       try {
         const block = document.queryCommandValue("formatBlock");
         setMarks({
@@ -108,15 +110,44 @@ export default function NoteEditor({
     if (ready.current) schedule(latest.current.title, html);
   }
 
+  function placeCaret() {
+    const page = paper.current;
+    const selection = document.getSelection();
+    if (!page || !selection) return;
+    page.focus();
+    const saved = savedRange.current;
+    if (saved && page.contains(saved.startContainer)) {
+      selection.removeAllRanges();
+      selection.addRange(saved);
+      return;
+    }
+    if (visibleText(page.innerHTML).length === 0) page.innerHTML = "<p><br></p>";
+    const range = document.createRange();
+    range.selectNodeContents(page);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    savedRange.current = range.cloneRange();
+  }
+
   function apply(command: string, value?: string) {
-    paper.current?.focus();
-    document.execCommand(command, false, value);
+    placeCaret();
+    let worked = document.execCommand(command, false, value);
+    if (!worked && command === "formatBlock" && value) {
+      const alternate = value.startsWith("<") ? value.slice(1, -1) : `<${value}>`;
+      worked = document.execCommand(command, false, alternate);
+    }
+    const selection = document.getSelection();
+    if (selection && selection.rangeCount > 0 && paper.current?.contains(selection.anchorNode)) {
+      savedRange.current = selection.getRangeAt(0).cloneRange();
+    }
     capture();
   }
 
   function heading() {
+    placeCaret();
     const current = document.queryCommandValue("formatBlock");
-    apply("formatBlock", /h2/i.test(current) ? "P" : "H2");
+    apply("formatBlock", /h2/i.test(current) ? "p" : "h2");
   }
 
   function schedule(nextTitle: string, nextBody: string) {
@@ -217,10 +248,10 @@ export default function NoteEditor({
         </div>
       </section>
       <div
-        className="fixed inset-x-0 z-30 mx-auto flex max-w-xl px-4"
+        className="pointer-events-none fixed inset-x-0 z-30 mx-auto flex max-w-xl px-4"
         style={{ bottom: `calc(${installVisible ? "16rem" : "5.25rem"} + env(safe-area-inset-bottom))` }}
       >
-        <div className="mr-16 flex w-full items-stretch rounded-2xl border border-slate-200 bg-white/95 p-1 shadow-[0_10px_30px_rgba(15,23,42,0.18)] backdrop-blur">
+        <div className="pointer-events-auto mr-16 flex w-full items-stretch rounded-2xl border border-slate-200 bg-white/95 p-1 shadow-[0_10px_30px_rgba(15,23,42,0.18)] backdrop-blur">
           <ToolButton label="Heading" pressed={marks.heading} onPress={heading}>
             <HeadingIcon />
           </ToolButton>
@@ -293,8 +324,10 @@ function ToolButton({
       type="button"
       aria-label={label}
       aria-pressed={pressed}
-      onPointerDown={(event) => event.preventDefault()}
-      onClick={onPress}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        onPress();
+      }}
       className={`flex h-12 flex-1 items-center justify-center rounded-xl ${
         pressed ? "bg-slate-900 text-white" : "text-slate-700"
       }`}

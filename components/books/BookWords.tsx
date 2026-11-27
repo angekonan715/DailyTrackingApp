@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { BookWord } from "@/types";
 import EmptyState from "@/components/EmptyState";
 import { createClient } from "@/lib/supabase/client";
-import { toDayKey } from "@/lib/dates";
+import { relativeDayLabel, toDayKey } from "@/lib/dates";
 import { dropWordFromNotes, keepWordInNotes } from "@/lib/book-words";
 
 const primary =
@@ -41,7 +41,7 @@ export default function BookWords({ bookId, bookTitle }: { bookId: string; bookT
           const supabase = createClient();
           for (const item of [...loaded].reverse()) {
             if (cancelled) return;
-            await keepWordInNotes(supabase, bookTitle, item.word, item.definition, item.example);
+            await keepWordInNotes(supabase, bookTitle, item.word, item.definition, item.example, searchDay(item.updated_at));
           }
         }
       } catch (loadError) {
@@ -135,9 +135,9 @@ export default function BookWords({ bookId, bookTitle }: { bookId: string; bookT
         </button>
       </form>
       <p className="mb-4 text-sm text-muted">
-        Each word is kept in Notes, in the Word notes folder, in a file named after this book.{" "}
+        The five latest words stay here. Every search is kept in Notes, under Word notes, with the day you looked it up.{" "}
         <Link href="/notes" className="font-medium text-accent">
-          Open Notes
+          Open the history
         </Link>
       </p>
       {error ? <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
@@ -145,10 +145,16 @@ export default function BookWords({ bookId, bookTitle }: { bookId: string; bookT
       {!loading && words.length === 0 ? (
         <EmptyState title="No words yet" hint="Add a word from the page you are reading. The coach explains it in one short sentence and an example." />
       ) : null}
+      {!loading && words.length > 5 ? (
+        <p className="mb-3 text-sm text-muted">
+          {words.length - 5} older {words.length - 5 === 1 ? "word is" : "words are"} in the history.
+        </p>
+      ) : null}
       <div className="space-y-3">
-        {words.map((item) => (
+        {words.slice(0, 5).map((item) => (
           <article key={item.id} className="rounded-3xl bg-[#fffdf8] p-5 text-slate-900 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
-            <h3 className="text-2xl font-semibold tracking-tight">{item.word}</h3>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{relativeDayLabel(searchDay(item.updated_at))}</p>
+            <h3 className="mt-1 text-2xl font-semibold tracking-tight">{item.word}</h3>
             <p className="mt-3 text-base leading-7">{item.definition}</p>
             <p className="mt-3 text-base leading-7 text-slate-600">
               <span className="font-semibold text-slate-800">Example. </span>
@@ -188,4 +194,9 @@ async function loadWords(bookId: string): Promise<BookWord[]> {
     .order("updated_at", { ascending: false });
   if (error) throw new Error(error.message);
   return (data ?? []) as BookWord[];
+}
+
+function searchDay(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value.slice(0, 10) : toDayKey(date);
 }

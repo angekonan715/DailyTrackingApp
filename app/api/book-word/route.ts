@@ -8,6 +8,7 @@ import {
   recordSpend,
 } from "@/lib/ai-server";
 import { isDayKey, monthKey } from "@/lib/coach";
+import { toDayKey } from "@/lib/dates";
 import { keepWordInNotes } from "@/lib/book-words";
 
 function json(body: unknown, status = 200) {
@@ -106,14 +107,10 @@ export async function POST(request: Request) {
       return json({ error: already.error.message }, 500);
     }
     if (already.data) {
-      const noteSaved = await keepWordInNotes(
-        supabase,
-        bookTitle,
-        already.data.word,
-        already.data.definition,
-        already.data.example,
-      );
-      return json({ word: already.data, already: true, noteSaved });
+      const searchedAt = new Date().toISOString();
+      await supabase.from("book_words").update({ updated_at: searchedAt }).eq("id", already.data.id);
+      const noteSaved = await keepWordInNotes(supabase, bookTitle, already.data.word, already.data.definition, already.data.example, today);
+      return json({ word: { ...already.data, updated_at: searchedAt }, already: true, noteSaved });
     }
     prompt = `Word: ${word}\nBook: ${bookTitle}`;
   }
@@ -140,12 +137,20 @@ export async function POST(request: Request) {
   if (polishing) {
     const saved = await supabase
       .from("book_words")
-      .update({ definition: taught.definition, example: taught.example, updated_at: new Date().toISOString() })
+      .update({ definition: taught.definition, example: taught.example })
       .eq("id", existingId)
       .select("id, word, definition, example, book_id, created_at, updated_at")
       .single();
     if (saved.error) return json({ error: saved.error.message }, 500);
-    const noteSaved = await keepWordInNotes(supabase, bookTitle, saved.data.word, taught.definition, taught.example);
+    const noteSaved = await keepWordInNotes(
+      supabase,
+      bookTitle,
+      saved.data.word,
+      taught.definition,
+      taught.example,
+      dayKey(saved.data.created_at),
+      true,
+    );
     return json({ word: saved.data, noteSaved });
   }
 
@@ -158,6 +163,11 @@ export async function POST(request: Request) {
     if (saved.error.code === "23505") return json({ error: "That word is already on this book." }, 409);
     return json({ error: saved.error.message }, 500);
   }
-  const noteSaved = await keepWordInNotes(supabase, bookTitle, saved.data.word, taught.definition, taught.example);
+  const noteSaved = await keepWordInNotes(supabase, bookTitle, saved.data.word, taught.definition, taught.example, today);
   return json({ word: saved.data, noteSaved });
+}
+
+function dayKey(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value.slice(0, 10) : toDayKey(date);
 }

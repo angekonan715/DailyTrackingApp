@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { formatLongDate } from "@/lib/dates";
 
 interface SavedWord {
   word: string;
@@ -13,8 +14,8 @@ function missingTable(message: string): boolean {
 
 export const WORD_NOTES_FOLDER = "Word notes";
 
-function wordBlock(word: string, definition: string, example: string): string {
-  return `${word.trim()}\n${definition.trim()}\nExample: ${example.trim()}`;
+function wordBlock(word: string, definition: string, example: string, searchedOn: string): string {
+  return `${word.trim()}\nSearched ${formatLongDate(searchedOn)}\n${definition.trim()}\nExample: ${example.trim()}`;
 }
 
 function blocks(body: string): string[] {
@@ -40,26 +41,46 @@ function looksFormatted(body: string): boolean {
   return /<\/?[a-z][\s\S]*>/i.test(body);
 }
 
-function wordHtml(word: string, definition: string, example: string): string {
-  return `<h2>${escapeHtml(word.trim())}</h2><p>${escapeHtml(definition.trim())}</p><p>Example: ${escapeHtml(example.trim())}</p>`;
+function wordHtml(word: string, definition: string, example: string, searchedOn: string): string {
+  return `<h2>${escapeHtml(word.trim())}</h2><p>Searched ${escapeHtml(formatLongDate(searchedOn))}</p><p>${escapeHtml(definition.trim())}</p><p>Example: ${escapeHtml(example.trim())}</p>`;
 }
 
-export function upsertWordEntry(body: string, word: string, definition: string, example: string): string {
+function savedDate(block: string, fallback: string): string {
+  const line = block
+    .replace(/<[^>]+>/g, "\n")
+    .split("\n")
+    .map((part) => part.trim())
+    .find((part) => /^searched\s+/i.test(part));
+  return line ? line.replace(/^searched\s+/i, "Searched ") : `Searched ${formatLongDate(fallback)}`;
+}
+
+export function upsertWordEntry(
+  body: string,
+  word: string,
+  definition: string,
+  example: string,
+  searchedOn: string,
+  keepDate = false,
+): string {
   if (looksFormatted(body)) {
-    const next = wordHtml(word, definition, example);
     const pattern = new RegExp(`<h2>\\s*${escapePattern(word.trim())}\\s*</h2>[\\s\\S]*?(?=<h2>|$)`, "i");
     const plain = new RegExp(
       `<p>\\s*${escapePattern(word.trim())}\\s*</p>\\s*<p>[\\s\\S]*?</p>\\s*<p>\\s*Example:[\\s\\S]*?</p>`,
       "i",
     );
+    const current = body.match(pattern)?.[0] ?? "";
+    const dated = keepDate && current ? wordHtml(word, definition, example, searchedOn).replace(/<p>Searched [^<]*<\/p>/, `<p>${escapeHtml(savedDate(current, searchedOn))}</p>`) : wordHtml(word, definition, example, searchedOn);
     const cleared = body.replace(pattern, "").replace(plain, "").trim();
-    return `${next}${cleared}`.slice(0, 40000);
+    return `${dated}${cleared}`.slice(0, 40000);
   }
-  const next = wordBlock(word, definition, example);
   const parts = blocks(body);
   const index = parts.findIndex((part) => sameWord(part, word));
-  if (index >= 0) parts[index] = next;
-  else parts.unshift(next);
+  const next =
+    keepDate && index >= 0
+      ? `${word.trim()}\n${savedDate(parts[index] ?? "", searchedOn)}\n${definition.trim()}\nExample: ${example.trim()}`
+      : wordBlock(word, definition, example, searchedOn);
+  if (index >= 0) parts.splice(index, 1);
+  parts.unshift(next);
   return parts.join("\n\n").slice(0, 40000);
 }
 
@@ -111,12 +132,17 @@ export async function keepWordInNotes(
   word: string,
   definition: string,
   example: string,
+  searchedOn: string,
+  keepDate = false,
 ): Promise<boolean> {
   const page = await notebook(supabase, bookTitle);
   if (!page) return false;
   const saved = await supabase
     .from("notes")
-    .update({ body: upsertWordEntry(page.body, word, definition, example), updated_at: new Date().toISOString() })
+    .update({
+      body: upsertWordEntry(page.body, word, definition, example, searchedOn, keepDate),
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", page.id);
   return !saved.error;
 }
