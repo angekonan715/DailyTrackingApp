@@ -335,6 +335,7 @@ function BooksScreen() {
         <PageHeader title={notesBook.title} subtitle={notesBook.status === "reading" ? "While you read" : "Notes on this book"} />
         <BookNotes
           bookId={notesBook.id}
+          bookTitle={notesBook.title}
           showWords={notesBook.status !== "want"}
           startOnWords={notesBook.status === "reading"}
           onBack={() => setNotesBook(null)}

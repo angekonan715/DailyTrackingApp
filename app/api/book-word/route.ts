@@ -8,6 +8,7 @@ import {
   recordSpend,
 } from "@/lib/ai-server";
 import { isDayKey, monthKey } from "@/lib/coach";
+import { keepWordInNotes } from "@/lib/book-words";
 
 function json(body: unknown, status = 200) {
   return Response.json(body, { status });
@@ -104,7 +105,16 @@ export async function POST(request: Request) {
       }
       return json({ error: already.error.message }, 500);
     }
-    if (already.data) return json({ word: already.data, already: true });
+    if (already.data) {
+      const noteSaved = await keepWordInNotes(
+        supabase,
+        bookTitle,
+        already.data.word,
+        already.data.definition,
+        already.data.example,
+      );
+      return json({ word: already.data, already: true, noteSaved });
+    }
     prompt = `Word: ${word}\nBook: ${bookTitle}`;
   }
 
@@ -135,7 +145,8 @@ export async function POST(request: Request) {
       .select("id, word, definition, example, book_id, created_at, updated_at")
       .single();
     if (saved.error) return json({ error: saved.error.message }, 500);
-    return json({ word: saved.data });
+    const noteSaved = await keepWordInNotes(supabase, bookTitle, saved.data.word, taught.definition, taught.example);
+    return json({ word: saved.data, noteSaved });
   }
 
   const saved = await supabase
@@ -147,5 +158,6 @@ export async function POST(request: Request) {
     if (saved.error.code === "23505") return json({ error: "That word is already on this book." }, 409);
     return json({ error: saved.error.message }, 500);
   }
-  return json({ word: saved.data });
+  const noteSaved = await keepWordInNotes(supabase, bookTitle, saved.data.word, taught.definition, taught.example);
+  return json({ word: saved.data, noteSaved });
 }

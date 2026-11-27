@@ -18,11 +18,13 @@ const primary = "min-h-12 w-full rounded-xl bg-accent px-4 text-base font-semibo
 
 export default function BookNotes({
   bookId,
+  bookTitle,
   showWords = false,
   startOnWords = false,
   onBack,
 }: {
   bookId: string;
+  bookTitle: string;
   showWords?: boolean;
   startOnWords?: boolean;
   onBack: () => void;
@@ -114,7 +116,7 @@ export default function BookNotes({
           </button>
         </div>
       ) : null}
-      {showWords && view === "words" ? <BookWords bookId={bookId} /> : null}
+      {showWords && view === "words" ? <BookWords bookId={bookId} bookTitle={bookTitle} /> : null}
       {!showWords || view === "notes" ? (
         <>
           <button type="button" disabled={busy} onClick={() => void createNote()} className={`mb-4 ${primary}`}>

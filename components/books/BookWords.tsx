@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import type { BookWord } from "@/types";
 import EmptyState from "@/components/EmptyState";
 import { createClient } from "@/lib/supabase/client";
 import { toDayKey } from "@/lib/dates";
+import { dropWordFromNotes, keepWordInNotes } from "@/lib/book-words";
 
 const primary =
   "min-h-12 rounded-xl bg-accent px-4 text-base font-semibold text-white disabled:opacity-60 dark:text-neutral-950";
@@ -16,7 +18,7 @@ function explain(message: string): string {
   return message;
 }
 
-export default function BookWords({ bookId }: { bookId: string }) {
+export default function BookWords({ bookId, bookTitle }: { bookId: string; bookTitle: string }) {
   const [words, setWords] = useState<BookWord[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
@@ -24,6 +26,7 @@ export default function BookWords({ bookId }: { bookId: string }) {
   const [busy, setBusy] = useState(false);
   const [polishingId, setPolishingId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const copied = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +36,14 @@ export default function BookWords({ bookId }: { bookId: string }) {
         if (cancelled) return;
         setWords(loaded);
         setError(null);
+        if (copied.current !== bookId && bookTitle && loaded.length > 0) {
+          copied.current = bookId;
+          const supabase = createClient();
+          for (const item of [...loaded].reverse()) {
+            if (cancelled) return;
+            await keepWordInNotes(supabase, bookTitle, item.word, item.definition, item.example);
+          }
+        }
       } catch (loadError) {
         if (!cancelled) setError(explain(loadError instanceof Error ? loadError.message : "Could not load words."));
       } finally {
@@ -43,7 +54,7 @@ export default function BookWords({ bookId }: { bookId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [bookId]);
+  }, [bookId, bookTitle]);
 
   async function explainWord(event: React.FormEvent) {
     event.preventDefault();
@@ -101,6 +112,8 @@ export default function BookWords({ bookId }: { bookId: string }) {
     }
     setConfirmId(null);
     setWords((current) => current.filter((item) => item.id !== id));
+    const gone = words.find((item) => item.id === id);
+    if (gone && bookTitle) await dropWordFromNotes(createClient(), bookTitle, gone.word);
   }
 
   return (
@@ -121,6 +134,12 @@ export default function BookWords({ bookId }: { bookId: string }) {
           {busy ? "Explaining…" : "Explain"}
         </button>
       </form>
+      <p className="mb-4 text-sm text-muted">
+        Each word is kept in Notes, in the Word notes folder, in a file named after this book.{" "}
+        <Link href="/notes" className="font-medium text-accent">
+          Open Notes
+        </Link>
+      </p>
       {error ? <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
       {loading ? <div className="h-28 animate-pulse rounded-3xl bg-card" /> : null}
       {!loading && words.length === 0 ? (
