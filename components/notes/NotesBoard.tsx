@@ -9,7 +9,8 @@ import NoteEditor from "@/components/notes/NoteEditor";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { relativeDayLabel } from "@/lib/dates";
-import { explainNotesError, noteTitle } from "@/lib/notes";
+import { explainNotesError, noteTitle, activeFolders, activeNotes, trashedFolders, trashedNotes, trashRemainLabel } from "@/lib/notes";
+import { destroyFolder, destroyNote, emptyTrash, moveFolderToTrash, moveNoteToTrash, purgeExpiredTrash, restoreFolder, restoreNote } from "@/lib/note-trash";
 
 interface NoteListItem {
   id: string;
@@ -17,6 +18,7 @@ interface NoteListItem {
   book_id: string | null;
   title: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 const primary = "min-h-12 rounded-xl bg-accent px-4 text-base font-semibold text-white dark:text-neutral-950";
@@ -61,6 +63,10 @@ function NotesScreen() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [rename, setRename] = useState("");
   const [confirmFolder, setConfirmFolder] = useState<string | null>(null);
+  const [confirmNote, setConfirmNote] = useState<string | null>(null);
+  const [confirmGone, setConfirmGone] = useState<string | null>(null);
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -141,10 +147,10 @@ function NotesScreen() {
 
   async function removeFolder(id: string) {
     setBusy(true);
-    const { error: deleteError } = await createClient().from("note_folders").delete().eq("id", id);
+    const deleteError = await moveFolderToTrash(id);
     setBusy(false);
     if (deleteError) {
-      setError(explainNotesError(deleteError.message));
+      setError(explainNotesError(deleteError));
       return;
     }
     setConfirmFolder(null);
@@ -152,22 +158,73 @@ function NotesScreen() {
     await reload();
   }
 
-  const here = folders.filter((folder) => folder.parent_id === folderId);
-  const files = notes.filter((note) => !note.book_id && note.folder_id === folderId);
-  const bookNotes = folderId ? [] : notes.filter((note) => note.book_id);
+  async function removeNote(id: string) {
+    setBusy(true);
+    const deleteError = await moveNoteToTrash(id);
+    setBusy(false);
+    if (deleteError) {
+      setError(explainNotesError(deleteError));
+      return;
+    }
+    setConfirmNote(null);
+    await reload();
+  }
+
+  async function restoreItem(kind: "note" | "folder", id: string) {
+    setBusy(true);
+    const restoreError = kind === "folder" ? await restoreFolder(id) : await restoreNote(id);
+    setBusy(false);
+    if (restoreError) {
+      setError(explainNotesError(restoreError));
+      return;
+    }
+    await reload();
+  }
+
+  async function destroyItem(kind: "note" | "folder", id: string) {
+    setBusy(true);
+    const destroyError = kind === "folder" ? await destroyFolder(id) : await destroyNote(id);
+    setBusy(false);
+    if (destroyError) {
+      setError(explainNotesError(destroyError));
+      return;
+    }
+    setConfirmGone(null);
+    await reload();
+  }
+
+  async function clearTrash() {
+    setBusy(true);
+    const clearError = await emptyTrash();
+    setBusy(false);
+    if (clearError) {
+      setError(explainNotesError(clearError));
+      return;
+    }
+    setConfirmEmpty(false);
+    await reload();
+  }
+
+  const keptFolders = activeFolders(folders);
+  const keptNotes = activeNotes(notes, folders);
+  const binFolders = trashedFolders(folders);
+  const binNotes = trashedNotes(notes, folders);
+  const here = keptFolders.filter((folder) => folder.parent_id === folderId);
+  const files = keptNotes.filter((note) => !note.book_id && note.folder_id === folderId);
+  const bookNotes = folderId ? [] : keptNotes.filter((note) => note.book_id);
   const crumbs: { id: string | null; name: string }[] = [{ id: null, name: "Notes" }];
   if (folderId) {
-    const trail = folderPath(folders, folderId).split(" / ").filter(Boolean);
+    const trail = folderPath(keptFolders, folderId).split(" / ").filter(Boolean);
     let parent: string | null = null;
     for (const name of trail) {
-      const match = folders.find((folder) => folder.parent_id === parent && folder.name === name);
+      const match = keptFolders.find((folder) => folder.parent_id === parent && folder.name === name);
       if (!match) break;
       crumbs.push({ id: match.id, name: match.name });
       parent = match.id;
     }
   }
-  const choices = folders
-    .map((folder) => ({ id: folder.id, label: folderPath(folders, folder.id) }))
+  const choices = keptFolders
+    .map((folder) => ({ id: folder.id, label: folderPath(keptFolders, folder.id) }))
     .sort((a, b) => a.label.localeCompare(b.label));
   const openNote = notes.find((note) => note.id === openId) ?? null;
 
@@ -194,6 +251,73 @@ function NotesScreen() {
     );
   }
 
+  if (showTrash) {
+    const bin = [
+      ...binFolders.map((folder) => ({
+        id: folder.id,
+        kind: "folder" as const,
+        name: folder.name,
+        deletedAt: folder.deleted_at ?? "",
+        detail: "Folder",
+      })),
+      ...binNotes.map((note) => ({
+        id: note.id,
+        kind: "note" as const,
+        name: noteTitle(note.title),
+        deletedAt: note.deleted_at ?? "",
+        detail: note.book_id ? `Note · ${books.get(note.book_id) ?? "Book"}` : "Note",
+      })),
+    ];
+    return (
+      <>
+        <PageHeader title="Trash" subtitle="Kept for 30 days, then deleted for good." />
+        <button type="button" onClick={() => setShowTrash(false)} className="mb-4 min-h-12 text-base font-medium text-accent">
+          Back to notes
+        </button>
+        {error ? <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
+        {bin.length === 0 ? (
+          <EmptyState title="Trash is empty" hint="Deleted notes and folders stay here for 30 days." />
+        ) : (
+          <div className="space-y-3">
+            {bin.map((item) => (
+              <article key={`${item.kind}-${item.id}`} className="rounded-2xl bg-card p-4">
+                <p className="font-semibold">{item.name}</p>
+                <p className="mt-1 text-sm text-muted">
+                  {item.detail} · {item.deletedAt ? trashRemainLabel(item.deletedAt) : "30 days left"}
+                </p>
+                <div className="mt-2 flex gap-3">
+                  <button type="button" disabled={busy} onClick={() => void restoreItem(item.kind, item.id)} className="min-h-12 font-medium text-accent">
+                    Restore
+                  </button>
+                  {confirmGone === `${item.kind}-${item.id}` ? (
+                    <button type="button" disabled={busy} onClick={() => void destroyItem(item.kind, item.id)} className="min-h-12 font-medium text-red-600 dark:text-red-400">
+                      Delete now
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setConfirmGone(`${item.kind}-${item.id}`)} className="min-h-12 text-sm text-muted">
+                      Delete now
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+            <div className="pt-2">
+              {confirmEmpty ? (
+                <button type="button" disabled={busy} onClick={() => void clearTrash()} className="min-h-12 font-medium text-red-600 dark:text-red-400">
+                  Empty trash now
+                </button>
+              ) : (
+                <button type="button" onClick={() => setConfirmEmpty(true)} className="min-h-12 text-sm text-muted">
+                  Empty trash
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader title="Notes" subtitle="Folders and pages, written like a note on a tablet." />
@@ -210,12 +334,23 @@ function NotesScreen() {
           </button>
         ))}
       </div>
-      <div className="mb-4 flex gap-2">
+      <div className="mb-4 flex flex-wrap gap-2">
         <button type="button" disabled={busy} onClick={() => void createNote()} className={`flex-1 ${primary}`}>
           New note
         </button>
         <button type="button" onClick={() => setMakingFolder((current) => !current)} className="min-h-12 rounded-xl bg-card px-4 text-sm font-semibold">
           New folder
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setShowTrash(true);
+            setConfirmGone(null);
+            setConfirmEmpty(false);
+          }}
+          className="min-h-12 rounded-xl bg-card px-4 text-sm font-semibold"
+        >
+          Trash{binFolders.length + binNotes.length > 0 ? ` ${binFolders.length + binNotes.length}` : ""}
         </button>
       </div>
       {makingFolder ? (
@@ -295,7 +430,7 @@ function NotesScreen() {
                   </button>
                   {confirmFolder === folder.id ? (
                     <button type="button" disabled={busy} onClick={() => void removeFolder(folder.id)} className="min-h-12 px-2 text-sm font-medium text-red-600 dark:text-red-400">
-                      Delete
+                      Trash
                     </button>
                   ) : (
                     <button type="button" onClick={() => setConfirmFolder(folder.id)} className="min-h-12 px-2 text-sm text-muted">
@@ -307,31 +442,47 @@ function NotesScreen() {
             </article>
           ))}
           {files.map((note) => (
-            <button
-              key={note.id}
-              type="button"
-              onClick={() => setOpenId(note.id)}
-              className="block w-full rounded-2xl bg-card p-4 text-left"
-            >
-              <span className="block font-semibold">{noteTitle(note.title)}</span>
-              <span className="mt-1 block text-sm text-muted">{relativeDayLabel(note.updated_at.slice(0, 10))}</span>
-            </button>
+            <article key={note.id} className="rounded-2xl bg-card p-4">
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setOpenId(note.id)} className="min-h-12 min-w-0 flex-1 text-left">
+                  <span className="block font-semibold">{noteTitle(note.title)}</span>
+                  <span className="mt-1 block text-sm text-muted">{relativeDayLabel(note.updated_at.slice(0, 10))}</span>
+                </button>
+                {confirmNote === note.id ? (
+                  <button type="button" disabled={busy} onClick={() => void removeNote(note.id)} className="min-h-12 px-2 text-sm font-medium text-red-600 dark:text-red-400">
+                    Trash
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => setConfirmNote(note.id)} className="min-h-12 px-2 text-sm text-muted">
+                    Delete
+                  </button>
+                )}
+              </div>
+            </article>
           ))}
           {bookNotes.length > 0 ? (
             <section className="space-y-3 pt-3">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">From books</h2>
               {bookNotes.map((note) => (
-                <button
-                  key={note.id}
-                  type="button"
-                  onClick={() => setOpenId(note.id)}
-                  className="block w-full rounded-2xl bg-card p-4 text-left"
-                >
-                  <span className="block font-semibold">{noteTitle(note.title)}</span>
-                  <span className="mt-1 block text-sm text-muted">
-                    {books.get(note.book_id ?? "") ?? "Book"} · {relativeDayLabel(note.updated_at.slice(0, 10))}
-                  </span>
-                </button>
+                <article key={note.id} className="rounded-2xl bg-card p-4">
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => setOpenId(note.id)} className="min-h-12 min-w-0 flex-1 text-left">
+                      <span className="block font-semibold">{noteTitle(note.title)}</span>
+                      <span className="mt-1 block text-sm text-muted">
+                        {books.get(note.book_id ?? "") ?? "Book"} · {relativeDayLabel(note.updated_at.slice(0, 10))}
+                      </span>
+                    </button>
+                    {confirmNote === note.id ? (
+                      <button type="button" disabled={busy} onClick={() => void removeNote(note.id)} className="min-h-12 px-2 text-sm font-medium text-red-600 dark:text-red-400">
+                        Trash
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => setConfirmNote(note.id)} className="min-h-12 px-2 text-sm text-muted">
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </article>
               ))}
             </section>
           ) : null}
@@ -343,9 +494,10 @@ function NotesScreen() {
 
 async function loadDesk(): Promise<{ folders: NoteFolder[]; notes: NoteListItem[]; books: Map<string, string> }> {
   const supabase = createClient();
+  await purgeExpiredTrash();
   const [folderResult, noteResult, bookResult] = await Promise.all([
-    supabase.from("note_folders").select("id, user_id, parent_id, name, created_at, updated_at").order("name"),
-    supabase.from("notes").select("id, folder_id, book_id, title, updated_at").order("updated_at", { ascending: false }),
+    supabase.from("note_folders").select("id, user_id, parent_id, name, created_at, updated_at, deleted_at").order("name"),
+    supabase.from("notes").select("id, folder_id, book_id, title, updated_at, deleted_at").order("updated_at", { ascending: false }),
     supabase.from("books").select("id, title"),
   ]);
   if (folderResult.error) throw new Error(folderResult.error.message);

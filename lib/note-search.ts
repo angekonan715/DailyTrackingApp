@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { ancestorInTrash } from "@/lib/notes";
 
 const STOP = new Set([
   "the", "and", "for", "that", "with", "this", "from", "have", "what", "when", "your", "about",
@@ -13,12 +14,14 @@ interface NoteRow {
   body?: string | null;
   folder_id: string | null;
   book_id: string | null;
+  deleted_at?: string | null;
 }
 
 interface FolderRow {
   id: string;
   parent_id: string | null;
   name: string;
+  deleted_at?: string | null;
 }
 
 function keywords(message: string): string[] {
@@ -83,37 +86,62 @@ function missingTable(message: string): boolean {
   return /relation|schema cache|does not exist|note_folders|notes/i.test(message);
 }
 
+function kept(note: NoteRow, folders: Map<string, FolderRow>): boolean {
+  if (note.deleted_at) return false;
+  return !ancestorInTrash([...folders.values()], note.folder_id);
+}
+
+async function listedNotes(
+  supabase: SupabaseClient,
+  filter: string | null,
+  limit: number,
+): Promise<{ rows: NoteRow[]; error: string | null }> {
+  const full = "id, title, body, folder_id, book_id, deleted_at";
+  const first = filter
+    ? await supabase.from("notes").select(full).is("deleted_at", null).or(filter).limit(limit)
+    : await supabase.from("notes").select(full).is("deleted_at", null).order("updated_at", { ascending: false }).limit(limit);
+  if (first.error && /deleted_at/i.test(first.error.message)) {
+    const plain = "id, title, body, folder_id, book_id";
+    const second = filter
+      ? await supabase.from("notes").select(plain).or(filter).limit(limit)
+      : await supabase.from("notes").select(plain).order("updated_at", { ascending: false }).limit(limit);
+    return { rows: (second.data ?? []) as NoteRow[], error: second.error?.message ?? null };
+  }
+  return { rows: (first.data ?? []) as NoteRow[], error: first.error?.message ?? null };
+}
+
 export async function loadNoteContext(supabase: SupabaseClient, message: string): Promise<string> {
-  const recent = await supabase
-    .from("notes")
-    .select("id, title, body, folder_id, book_id")
-    .order("updated_at", { ascending: false })
-    .limit(12);
+  const recent = await listedNotes(supabase, null, 12);
   if (recent.error) {
-    if (missingTable(recent.error.message)) return "";
+    if (missingTable(recent.error)) return "";
     return "";
   }
-  const rows = (recent.data ?? []) as NoteRow[];
   const words = keywords(message);
   let found: NoteRow[] = [];
   if (words.length > 0) {
     const filter = words.map((word) => `title.ilike.%${word}%,body.ilike.%${word}%`).join(",");
-    const matches = await supabase.from("notes").select("id, title, body, folder_id, book_id").or(filter).limit(8);
-    if (!matches.error) found = (matches.data ?? []) as NoteRow[];
+    const matches = await listedNotes(supabase, filter, 8);
+    if (!matches.error) found = matches.rows;
   }
-  if (rows.length === 0 && found.length === 0) return "";
 
-  const bookIds = [...new Set(rows.concat(found).map((note) => note.book_id).filter((id): id is string => Boolean(id)))];
-  const [folderResult, bookResult] = await Promise.all([
-    supabase.from("note_folders").select("id, parent_id, name"),
+  const bookIds = [...new Set(recent.rows.concat(found).map((note) => note.book_id).filter((id): id is string => Boolean(id)))];
+  const folderQuery = await supabase.from("note_folders").select("id, parent_id, name, deleted_at");
+  const folderResult =
+    folderQuery.error && /deleted_at/i.test(folderQuery.error.message)
+      ? await supabase.from("note_folders").select("id, parent_id, name")
+      : folderQuery;
+  const bookResult =
     bookIds.length > 0
-      ? supabase.from("books").select("id, title").in("id", bookIds)
-      : Promise.resolve({ data: [], error: null }),
-  ]);
+      ? await supabase.from("books").select("id, title").in("id", bookIds)
+      : { data: [], error: null };
   const folders = new Map<string, FolderRow>();
   for (const folder of (folderResult.data ?? []) as FolderRow[]) folders.set(folder.id, folder);
   const books = new Map<string, string>();
   for (const book of (bookResult.data ?? []) as { id: string; title: string }[]) books.set(book.id, book.title);
+
+  const rows = recent.rows.filter((note) => kept(note, folders));
+  found = found.filter((note) => kept(note, folders));
+  if (rows.length === 0 && found.length === 0) return "";
 
   const ranked = found
     .map((note) => {

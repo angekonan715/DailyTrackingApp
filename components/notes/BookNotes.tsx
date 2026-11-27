@@ -7,6 +7,7 @@ import EmptyState from "@/components/EmptyState";
 import { createClient } from "@/lib/supabase/client";
 import { relativeDayLabel } from "@/lib/dates";
 import { explainNotesError, noteTitle } from "@/lib/notes";
+import { moveNoteToTrash, purgeExpiredTrash } from "@/lib/note-trash";
 
 interface BookNote {
   id: string;
@@ -35,6 +36,7 @@ export default function BookNotes({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +76,18 @@ export default function BookNotes({
       return;
     }
     setOpenId(data.id);
+  }
+
+  async function removeNote(id: string) {
+    setBusy(true);
+    const deleteError = await moveNoteToTrash(id);
+    setBusy(false);
+    if (deleteError) {
+      setError(explainNotesError(deleteError));
+      return;
+    }
+    setConfirmId(null);
+    await reload().catch((reason: Error) => setError(explainNotesError(reason.message)));
   }
 
   if (openId) {
@@ -129,10 +143,23 @@ export default function BookNotes({
           ) : null}
           <div className="space-y-3">
             {notes.map((note) => (
-              <button key={note.id} type="button" onClick={() => setOpenId(note.id)} className="block w-full rounded-2xl bg-card p-4 text-left">
-                <span className="block font-semibold">{noteTitle(note.title)}</span>
-                <span className="mt-1 block text-sm text-muted">{relativeDayLabel(note.updated_at.slice(0, 10))}</span>
-              </button>
+              <article key={note.id} className="rounded-2xl bg-card p-4">
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => setOpenId(note.id)} className="min-h-12 min-w-0 flex-1 text-left">
+                    <span className="block font-semibold">{noteTitle(note.title)}</span>
+                    <span className="mt-1 block text-sm text-muted">{relativeDayLabel(note.updated_at.slice(0, 10))}</span>
+                  </button>
+                  {confirmId === note.id ? (
+                    <button type="button" disabled={busy} onClick={() => void removeNote(note.id)} className="min-h-12 px-2 text-sm font-medium text-red-600 dark:text-red-400">
+                      Trash
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setConfirmId(note.id)} className="min-h-12 px-2 text-sm text-muted">
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </article>
             ))}
           </div>
         </>
@@ -142,10 +169,12 @@ export default function BookNotes({
 }
 
 async function loadBookNotes(bookId: string): Promise<BookNote[]> {
+  await purgeExpiredTrash();
   const { data, error } = await createClient()
     .from("notes")
     .select("id, title, updated_at")
     .eq("book_id", bookId)
+    .is("deleted_at", null)
     .order("updated_at", { ascending: false });
   if (error) throw new Error(error.message);
   return (data ?? []) as BookNote[];

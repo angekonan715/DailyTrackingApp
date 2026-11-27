@@ -111,13 +111,23 @@ export function removeWordEntry(body: string, word: string): string {
 }
 
 async function wordNotesFolder(supabase: SupabaseClient): Promise<string | null> {
-  const existing = await supabase
+  let existing = await supabase
     .from("note_folders")
     .select("id")
     .is("parent_id", null)
     .eq("name", WORD_NOTES_FOLDER)
+    .is("deleted_at", null)
     .limit(1)
     .maybeSingle();
+  if (existing.error && /deleted_at/i.test(existing.error.message)) {
+    existing = await supabase
+      .from("note_folders")
+      .select("id")
+      .is("parent_id", null)
+      .eq("name", WORD_NOTES_FOLDER)
+      .limit(1)
+      .maybeSingle();
+  }
   if (existing.error) return null;
   if (typeof existing.data?.id === "string") return existing.data.id;
   const created = await supabase.from("note_folders").insert({ name: WORD_NOTES_FOLDER }).select("id").single();
@@ -128,7 +138,17 @@ async function notebook(supabase: SupabaseClient, bookTitle: string): Promise<{ 
   const folderId = await wordNotesFolder(supabase);
   if (!folderId) return null;
   const title = bookTitle.trim().slice(0, 200) || "Words";
-  const found = await supabase.from("notes").select("id, body").eq("folder_id", folderId).eq("title", title).is("book_id", null).maybeSingle();
+  let found = await supabase
+    .from("notes")
+    .select("id, body")
+    .eq("folder_id", folderId)
+    .eq("title", title)
+    .is("book_id", null)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (found.error && /deleted_at/i.test(found.error.message)) {
+    found = await supabase.from("notes").select("id, body").eq("folder_id", folderId).eq("title", title).is("book_id", null).maybeSingle();
+  }
   if (found.error) return null;
   if (typeof found.data?.id === "string") {
     return { id: found.data.id, body: typeof found.data.body === "string" ? found.data.body : "" };

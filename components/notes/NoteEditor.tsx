@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { explainNotesError } from "@/lib/notes";
+import { moveNoteToTrash } from "@/lib/note-trash";
 import { useInstallVisible } from "@/components/InstallPrompt";
 
 interface FolderChoice {
@@ -196,11 +197,12 @@ export default function NoteEditor({
   async function remove() {
     setRemoving(true);
     ready.current = false;
-    const { error: deleteError } = await createClient().from("notes").delete().eq("id", noteId);
+    if (timer.current) clearTimeout(timer.current);
+    const deleteError = await moveNoteToTrash(noteId);
     if (deleteError) {
       ready.current = true;
       setRemoving(false);
-      setError(explainNotesError(deleteError.message));
+      setError(explainNotesError(deleteError));
       return;
     }
     onDeleted();
@@ -292,7 +294,7 @@ export default function NoteEditor({
         {confirming ? (
           <div className="flex gap-3">
             <button type="button" disabled={removing} onClick={() => void remove()} className="min-h-12 font-medium text-red-600 dark:text-red-400">
-              {removing ? "Deleting…" : "Delete note"}
+              {removing ? "Moving…" : "Move to trash"}
             </button>
             <button type="button" onClick={() => setConfirming(false)} className="min-h-12 text-muted">
               Cancel

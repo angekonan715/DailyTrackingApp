@@ -109,6 +109,7 @@ export interface NoteFolder {
   name: string;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 export interface Note {
@@ -120,6 +121,7 @@ export interface Note {
   body: string;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 export interface BookWord {
