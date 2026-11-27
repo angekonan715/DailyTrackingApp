@@ -14,6 +14,12 @@ function json(body: unknown, status = 200) {
   return Response.json(body, { status });
 }
 
+function missingAuthor(author: unknown): boolean {
+  if (typeof author !== "string") return true;
+  const name = author.trim();
+  return name.length < 2 || /^daily hub$/i.test(name);
+}
+
 function missingTable(message: string): boolean {
   return /relation|schema cache|does not exist|daily_quotes/i.test(message);
 }
@@ -50,8 +56,8 @@ export async function GET(request: Request) {
     return json({ error: row.error.message }, 500);
   }
   return json({
-    quote: typeof row.data?.quote === "string" ? row.data.quote : null,
-    author: typeof row.data?.author === "string" ? row.data.author : null,
+    quote: typeof row.data?.quote === "string" && !missingAuthor(row.data.author) ? row.data.quote : null,
+    author: typeof row.data?.author === "string" && !missingAuthor(row.data.author) ? row.data.author : null,
   });
 }
 
@@ -68,7 +74,7 @@ export async function POST(request: Request) {
     }
     return json({ error: existing.error.message }, 500);
   }
-  if (typeof existing.data?.quote === "string") {
+  if (typeof existing.data?.quote === "string" && !missingAuthor(existing.data.author)) {
     return json({ quote: existing.data.quote, author: existing.data.author });
   }
 
@@ -97,7 +103,7 @@ export async function POST(request: Request) {
       {
         role: "system",
         content:
-          'Write one original motivational sentence for this person. Reply with JSON only: {"quote":"...","author":"Daily Hub"}. Under 140 characters. Warm and specific only when the week summary supports it. Do not attribute the line to a real person. No medical advice.',
+          'Choose one real, well-known motivational quote. Reply with JSON only: {"quote":"...","author":"Full Name"}. The quote is that person\'s actual words, under 180 characters, and does not include their name. The author is the real person who said it. Do not invent a quote or give a line to the wrong person. No medical advice.',
       },
       { role: "user", content: brief },
     ],
@@ -114,7 +120,9 @@ export async function POST(request: Request) {
     return json({ error: error instanceof Error ? error.message : "Could not record the coach cost." }, 500);
   }
 
-  const saved = await supabase.from("daily_quotes").insert({ day: today, quote: quote.quote, author: quote.author });
+  const saved = existing.data
+    ? await supabase.from("daily_quotes").update({ quote: quote.quote, author: quote.author }).eq("day", today)
+    : await supabase.from("daily_quotes").insert({ day: today, quote: quote.quote, author: quote.author });
   if (saved.error && saved.error.code !== "23505") return json({ error: saved.error.message }, 500);
   return json({ quote: quote.quote, author: quote.author });
 }

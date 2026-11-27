@@ -97,12 +97,18 @@ export function parseQuote(content: string): { quote: string; author: string } |
     return null;
   }
   if (!value || typeof value !== "object") return null;
-  const quote = "quote" in value && typeof value.quote === "string" ? value.quote.trim().slice(0, 180) : "";
-  if (quote.length < 8) return null;
+  const quoteText = "quote" in value && typeof value.quote === "string" ? value.quote.trim().slice(0, 180) : "";
   const author =
     "author" in value && typeof value.author === "string" && value.author.trim()
-      ? value.author.trim().slice(0, 40)
-      : "Daily Hub";
+      ? value.author.trim().replace(/\s+/g, " ").slice(0, 40)
+      : "";
+  const quote = (author
+    ? quoteText.replace(new RegExp(`\\s*[—–-]\\s*${author.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i"), "")
+    : quoteText
+  )
+    .replace(/^["“]|["”]$/g, "")
+    .trim();
+  if (quote.length < 8 || author.length < 2 || /^daily hub$/i.test(author)) return null;
   return { quote, author };
 }
 

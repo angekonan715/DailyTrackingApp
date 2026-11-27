@@ -33,7 +33,7 @@ export default function DailyQuote({
         }
         if (typeof body.quote === "string" && body.quote) {
           setQuote(body.quote);
-          setAuthor(body.author ?? "Daily Hub");
+          setAuthor(typeof body.author === "string" ? body.author : null);
           return;
         }
         const created = await fetch("/api/daily-quote", {
@@ -53,7 +53,7 @@ export default function DailyQuote({
         if (cancelled) return;
         if (typeof next.quote === "string" && next.quote) {
           setQuote(next.quote);
-          setAuthor(next.author ?? "Daily Hub");
+          setAuthor(typeof next.author === "string" ? next.author : null);
           return;
         }
         if (quiet || next.code === "missing_key" || next.code === "needs_server") return;
@@ -76,7 +76,7 @@ export default function DailyQuote({
     <section className={`rounded-2xl bg-card px-4 py-3 ${className}`.trim()}>
       <p className="text-xs font-medium text-muted">For today</p>
       <p className="mt-1 text-base leading-6">“{quote}”</p>
-      <p className="mt-1 text-xs text-muted">{author}</p>
+      {author ? <p className="mt-1 text-sm font-semibold">— {author}</p> : null}
     </section>
   );
 }
