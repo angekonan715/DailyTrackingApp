@@ -49,6 +49,54 @@ function newest(notes: ShelfNote[]): ShelfNote | null {
   return [...notes].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0] ?? null;
 }
 
+function sameTitle(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+function isLegacyWordFolder(name: string): boolean {
+  const clean = name.trim().toLowerCase();
+  return clean === "word notes" || clean === "word note";
+}
+
+function hasWriting(body: string): boolean {
+  return body.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim().length > 0;
+}
+
+function mergeWordNotes(current: string, previous: string): string {
+  const prior = previous.trim();
+  if (!prior) return current;
+  const next = current.trim();
+  if (!hasWriting(next)) return prior.slice(0, 40000);
+  const known = new Set<string>();
+  for (const match of next.matchAll(/<h2[^>]*>\s*(?:<strong>)?\s*([^<]+)/gi)) known.add((match[1] ?? "").trim().toLowerCase());
+  if (!next.includes("<")) {
+    for (const block of next.split(/\n{2,}/)) {
+      const first = block.trim().split("\n")[0]?.trim().toLowerCase() ?? "";
+      if (first) known.add(first);
+    }
+  }
+  if (/<h2[\s>]/i.test(prior)) {
+    const extra = prior
+      .split(/(?=<h2[\s>])/i)
+      .filter((part) => part.trim())
+      .filter((part) => {
+        const name = part.match(/<h2[^>]*>\s*(?:<strong>)?\s*([^<]+)/i)?.[1]?.trim().toLowerCase() ?? "";
+        return name ? !known.has(name) : true;
+      });
+    return `${next}${extra.join("")}`.slice(0, 40000);
+  }
+  const extra = prior
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => {
+      const name = part.split("\n")[0]?.trim().toLowerCase() ?? "";
+      return name ? !known.has(name) : true;
+    });
+  if (extra.length === 0) return next.slice(0, 40000);
+  return `${next}\n\n${extra.join("\n\n")}`.slice(0, 40000);
+}
+
 async function rootFolder(supabase: SupabaseClient, folders: ShelfFolder[], name: string): Promise<{ id: string | null; error: string | null }> {
   const found = folders.find((folder) => !folder.deleted_at && folder.parent_id == null && folder.name === name);
   if (found) return { id: found.id, error: null };
@@ -127,12 +175,16 @@ function pickWord(notes: ShelfNote[], book: BookRef, wordFolderIds: Set<string>,
   const plain = book.title.trim();
   const free = notes.filter((note) => !claimed.has(note.id) && !note.deleted_at && wordFolderIds.has(note.folder_id ?? ""));
   return (
-    free.find((note) => note.book_id === book.id && note.title === title) ??
-    free.find((note) => note.title === title && (note.book_id == null || note.book_id === book.id)) ??
+    free.find((note) => note.book_id === book.id && sameTitle(note.title, title)) ??
+    free.find((note) => sameTitle(note.title, title) && (note.book_id == null || note.book_id === book.id)) ??
     free.find((note) => note.book_id === book.id) ??
-    free.find((note) => plain.length > 0 && note.title === plain && (note.book_id == null || note.book_id === book.id)) ??
+    free.find((note) => plain.length > 0 && sameTitle(note.title, plain) && (note.book_id == null || note.book_id === book.id)) ??
     null
   );
+}
+
+function oldWordFile(note: ShelfNote, book: BookRef): boolean {
+  return sameTitle(note.title, book.title) || sameTitle(note.title, newWordFileTitle(book.title));
 }
 
 function trashedTitle(notes: ShelfNote[], book: BookRef, title: string, claimed: Set<string>): boolean {
@@ -202,11 +254,68 @@ export async function ensureLibrary(supabase: SupabaseClient, books: BookRef[]):
     }
   }
 
+  const folded = await foldLegacyWordNotes(supabase, books, shelf.notes, shelf.folders, wordFolder.id);
+  if (folded) return folded;
+
   if (legacy) {
     const stillThere = shelf.notes.some((note) => !note.deleted_at && note.folder_id === legacy.id);
     if (!stillThere) {
       await supabase.from("note_folders").update({ deleted_at: new Date().toISOString() }).eq("id", legacy.id);
     }
+  }
+  return null;
+}
+
+async function foldLegacyWordNotes(
+  supabase: SupabaseClient,
+  books: BookRef[],
+  notes: ShelfNote[],
+  folders: ShelfFolder[],
+  wordFolderId: string,
+): Promise<string | null> {
+  const legacyIds = new Set(folders.filter((folder) => isLegacyWordFolder(folder.name)).map((folder) => folder.id));
+  if (legacyIds.size === 0) return null;
+  for (const book of books) {
+    const title = newWordFileTitle(book.title);
+    const canonical = notes.find(
+      (note) => !note.deleted_at && note.folder_id === wordFolderId && sameTitle(note.title, title) && (note.book_id == null || note.book_id === book.id),
+    );
+    const leftovers = notes.filter((note) => {
+      if (note.deleted_at || note.id === canonical?.id) return false;
+      const inLegacy = legacyIds.has(note.folder_id ?? "");
+      const oldTitleInNewFolder = note.folder_id === wordFolderId && sameTitle(note.title, book.title);
+      return (inLegacy || oldTitleInNewFolder) && oldWordFile(note, book);
+    });
+    if (leftovers.length === 0) continue;
+    let target = canonical ?? null;
+    let pending = leftovers;
+    if (!target) {
+      const moved = await place(supabase, leftovers[0] ?? null, wordFolderId, book.id, title);
+      if (moved.error || !moved.id) return moved.error;
+      target = leftovers[0] ?? null;
+      pending = leftovers.slice(1);
+    }
+    if (!target || pending.length === 0) continue;
+    const ids = [target.id, ...pending.map((note) => note.id)];
+    const bodies = await supabase.from("notes").select("id, body").in("id", ids);
+    if (bodies.error) return bodies.error.message;
+    const text = new Map<string, string>();
+    for (const row of (bodies.data ?? []) as { id: string; body: string | null }[]) {
+      text.set(row.id, typeof row.body === "string" ? row.body : "");
+    }
+    let merged = text.get(target.id) ?? "";
+    for (const note of pending) merged = mergeWordNotes(merged, text.get(note.id) ?? "");
+    if (merged !== (text.get(target.id) ?? "")) {
+      const saved = await supabase.from("notes").update({ body: merged, updated_at: new Date().toISOString() }).eq("id", target.id);
+      if (saved.error) return saved.error.message;
+    }
+    const removed = await supabase.from("notes").delete().in(
+      "id",
+      pending.map((note) => note.id),
+    );
+    if (removed.error) return removed.error.message;
+    const gone = new Date().toISOString();
+    for (const note of pending) note.deleted_at = gone;
   }
   return null;
 }
