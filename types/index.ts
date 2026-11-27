@@ -121,3 +121,14 @@ export interface Note {
   created_at: string;
   updated_at: string;
 }
+
+export interface BookWord {
+  id: string;
+  user_id: string;
+  book_id: string;
+  word: string;
+  definition: string;
+  example: string;
+  created_at: string;
+  updated_at: string;
+}

@@ -10,6 +10,7 @@ import {
 import { isDayKey, isTimeZone, monthKey } from "@/lib/coach";
 import { loadWeekBrief } from "@/lib/week-brief";
 import { loadNoteContext } from "@/lib/note-search";
+import { loadWordContext } from "@/lib/book-words";
 
 function json(body: unknown, status = 200) {
   return Response.json(body, { status });
@@ -108,6 +109,7 @@ export async function POST(request: Request) {
     brief = `Day ${today}.`;
   }
   const notes = await loadNoteContext(supabase, message);
+  const words = await loadWordContext(supabase, message);
 
   const prior = ((history.data ?? []) as { role: "user" | "assistant"; content: string }[])
     .reverse()
@@ -118,7 +120,7 @@ export async function POST(request: Request) {
     [
       {
         role: "system",
-        content: `You are the Daily Hub coach for one person. Help with their tasks, workouts, reading, hobbies, notes, and motivation. Use the week summary, their notes, and what they tell you. When they mention an idea from a note, find that note, say its title and where it lives, and quote the matching lines. If you do not know a number or cannot find a note, say so. Keep everyday replies under 80 words. A note answer may be a little longer. No medical diagnosis or diet plan. Never ask for or repeat an API key.\n\nWeek:\n${brief}${notes ? `\n\n${notes}` : ""}`,
+        content: `You are the Daily Hub coach for one person. Help with their tasks, workouts, reading, hobbies, notes, and motivation. Use the week summary, their notes, their saved words, and what they tell you. When they mention an idea from a note, find that note, say its title and where it lives, and quote the matching lines. When they ask about a saved word, explain it in one or two short sentences a middle school student would understand, and include the example. If you do not know a number or cannot find a note, say so. Keep everyday replies under 80 words. A note or word answer may be a little longer. No medical diagnosis or diet plan. Never ask for or repeat an API key.\n\nWeek:\n${brief}${notes ? `\n\n${notes}` : ""}${words ? `\n\n${words}` : ""}`,
       },
       ...prior.map((item) => ({ role: item.role, content: item.content })),
       { role: "user", content: message },

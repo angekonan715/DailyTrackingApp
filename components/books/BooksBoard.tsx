@@ -332,8 +332,13 @@ function BooksScreen() {
   if (notesBook) {
     return (
       <>
-        <PageHeader title={notesBook.title} subtitle="Notes on this book" />
-        <BookNotes bookId={notesBook.id} onBack={() => setNotesBook(null)} />
+        <PageHeader title={notesBook.title} subtitle={notesBook.status === "reading" ? "While you read" : "Notes on this book"} />
+        <BookNotes
+          bookId={notesBook.id}
+          showWords={notesBook.status !== "want"}
+          startOnWords={notesBook.status === "reading"}
+          onBack={() => setNotesBook(null)}
+        />
       </>
     );
   }
@@ -823,7 +828,7 @@ function ReadingCard({
           )}
           {cardError ? <p className="text-sm text-red-600 dark:text-red-400">{cardError}</p> : null}
           <button type="button" onClick={onNotes} className="min-h-12 w-full rounded-xl bg-background text-sm font-semibold">
-            Notes
+            Notes and words
           </button>
           <CardActions
             editing={editing}
