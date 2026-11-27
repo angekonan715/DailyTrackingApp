@@ -12,6 +12,9 @@ const primary =
   "min-h-12 rounded-xl bg-accent px-4 text-base font-semibold text-white disabled:opacity-60 dark:text-neutral-950";
 
 function explain(message: string): string {
+  if (/pronunciation/i.test(message)) {
+    return "Pronunciation needs a short script. In Supabase, open the SQL Editor, paste it, and run it.";
+  }
   if (/book_words|schema cache|does not exist|relation/i.test(message)) {
     return "Word notes are not set up yet. In Supabase, open the SQL Editor, paste the word notes script, and run it.";
   }
@@ -41,7 +44,7 @@ export default function BookWords({ bookId, bookTitle }: { bookId: string; bookT
           const supabase = createClient();
           for (const item of [...loaded].reverse()) {
             if (cancelled) return;
-            await keepWordInNotes(supabase, bookTitle, item.word, item.definition, item.example, searchDay(item.updated_at));
+            await keepWordInNotes(supabase, bookId, bookTitle, item.word, item.definition, item.example, searchDay(item.updated_at), false, item.pronunciation ?? "");
           }
         }
       } catch (loadError) {
@@ -113,7 +116,7 @@ export default function BookWords({ bookId, bookTitle }: { bookId: string; bookT
     setConfirmId(null);
     setWords((current) => current.filter((item) => item.id !== id));
     const gone = words.find((item) => item.id === id);
-    if (gone && bookTitle) await dropWordFromNotes(createClient(), bookTitle, gone.word);
+    if (gone && bookTitle) await dropWordFromNotes(createClient(), bookId, bookTitle, gone.word);
   }
 
   return (
@@ -135,7 +138,7 @@ export default function BookWords({ bookId, bookTitle }: { bookId: string; bookT
         </button>
       </form>
       <p className="mb-4 text-sm text-muted">
-        The five latest words stay here. Every search is kept in Notes, under Word notes, with the day you looked it up.{" "}
+        The five latest words stay here. Every search is also saved in Notes, in the New Word folder, inside “New Word from {bookTitle}”.{" "}
         <Link href="/notes" className="font-medium text-accent">
           Open the history
         </Link>
@@ -155,6 +158,7 @@ export default function BookWords({ bookId, bookTitle }: { bookId: string; bookT
           <article key={item.id} className="rounded-3xl bg-[#fffdf8] p-5 text-slate-900 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{relativeDayLabel(searchDay(item.updated_at))}</p>
             <h3 className="mt-1 text-2xl font-semibold tracking-tight">{item.word}</h3>
+            {item.pronunciation ? <p className="mt-2 text-base leading-7 text-slate-600">{item.pronunciation}</p> : null}
             <p className="mt-3 text-base leading-7">{item.definition}</p>
             <p className="mt-3 text-base leading-7 text-slate-600">
               <span className="font-semibold text-slate-800">Example. </span>
@@ -189,7 +193,7 @@ export default function BookWords({ bookId, bookTitle }: { bookId: string; bookT
 async function loadWords(bookId: string): Promise<BookWord[]> {
   const { data, error } = await createClient()
     .from("book_words")
-    .select("id, user_id, book_id, word, definition, example, created_at, updated_at")
+    .select("id, user_id, book_id, word, definition, example, pronunciation, created_at, updated_at")
     .eq("book_id", bookId)
     .order("updated_at", { ascending: false });
   if (error) throw new Error(error.message);

@@ -8,6 +8,8 @@ import SetupNotice from "@/components/SetupNotice";
 import { createClient } from "@/lib/supabase/client";
 import GoalBoard from "@/components/goals/GoalBoard";
 import BookNotes from "@/components/notes/BookNotes";
+import { explainNotesError } from "@/lib/notes";
+import { ensureLibrary } from "@/lib/book-files";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { formatLongDate, parseDayKey, toDayKey } from "@/lib/dates";
 import {
@@ -276,6 +278,9 @@ function BooksScreen() {
       if (path) await supabase.storage.from(COVER_BUCKET).remove([path]);
     }
 
+    const fileError = await ensureLibrary(supabase, [{ id: bookId, title: draft.title.trim() }]);
+    if (fileError) setError(explainNotesError(fileError));
+
     setAdding(false);
     setEditingId(null);
     await refresh();
@@ -337,7 +342,6 @@ function BooksScreen() {
           bookId={notesBook.id}
           bookTitle={notesBook.title}
           showWords={notesBook.status !== "want"}
-          startOnWords={notesBook.status === "reading"}
           onBack={() => setNotesBook(null)}
         />
       </>

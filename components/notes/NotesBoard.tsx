@@ -11,6 +11,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { relativeDayLabel } from "@/lib/dates";
 import { explainNotesError, noteTitle, activeFolders, activeNotes, trashedFolders, trashedNotes, trashRemainLabel } from "@/lib/notes";
 import { destroyFolder, destroyNote, emptyTrash, moveFolderToTrash, moveNoteToTrash, purgeExpiredTrash, restoreFolder, restoreNote } from "@/lib/note-trash";
+import { ensureLibrary } from "@/lib/book-files";
 
 interface NoteListItem {
   id: string;
@@ -78,7 +79,7 @@ function NotesScreen() {
         setFolders(loaded.folders);
         setNotes(loaded.notes);
         setBooks(loaded.books);
-        setError(null);
+        setError(loaded.warning ? explainNotesError(loaded.warning) : null);
       } catch (loadError) {
         if (!cancelled) setError(explainNotesError(loadError instanceof Error ? loadError.message : "Could not load notes."));
       } finally {
@@ -96,6 +97,7 @@ function NotesScreen() {
     setFolders(loaded.folders);
     setNotes(loaded.notes);
     setBooks(loaded.books);
+    if (loaded.warning) setError(explainNotesError(loaded.warning));
   }
 
   async function createNote() {
@@ -210,8 +212,8 @@ function NotesScreen() {
   const binFolders = trashedFolders(folders);
   const binNotes = trashedNotes(notes, folders);
   const here = keptFolders.filter((folder) => folder.parent_id === folderId);
-  const files = keptNotes.filter((note) => !note.book_id && note.folder_id === folderId);
-  const bookNotes = folderId ? [] : keptNotes.filter((note) => note.book_id);
+  const files = keptNotes.filter((note) => note.folder_id === folderId);
+  const bookNotes = folderId ? [] : keptNotes.filter((note) => note.book_id && !note.folder_id);
   const crumbs: { id: string | null; name: string }[] = [{ id: null, name: "Notes" }];
   if (folderId) {
     const trail = folderPath(keptFolders, folderId).split(" / ").filter(Boolean);
@@ -492,13 +494,14 @@ function NotesScreen() {
   );
 }
 
-async function loadDesk(): Promise<{ folders: NoteFolder[]; notes: NoteListItem[]; books: Map<string, string> }> {
+async function loadDesk(): Promise<{ folders: NoteFolder[]; notes: NoteListItem[]; books: Map<string, string>; warning: string | null }> {
   const supabase = createClient();
   await purgeExpiredTrash();
-  const [folderResult, noteResult, bookResult] = await Promise.all([
+  const bookResult = await supabase.from("books").select("id, title");
+  const warning = bookResult.error ? null : await ensureLibrary(supabase, (bookResult.data ?? []) as { id: string; title: string }[]);
+  const [folderResult, noteResult] = await Promise.all([
     supabase.from("note_folders").select("id, user_id, parent_id, name, created_at, updated_at, deleted_at").order("name"),
     supabase.from("notes").select("id, folder_id, book_id, title, updated_at, deleted_at").order("updated_at", { ascending: false }),
-    supabase.from("books").select("id, title"),
   ]);
   if (folderResult.error) throw new Error(folderResult.error.message);
   if (noteResult.error) throw new Error(noteResult.error.message);
@@ -508,5 +511,6 @@ async function loadDesk(): Promise<{ folders: NoteFolder[]; notes: NoteListItem[
     folders: (folderResult.data ?? []) as NoteFolder[],
     notes: (noteResult.data ?? []) as NoteListItem[],
     books: bookNames,
+    warning,
   };
 }

@@ -12,6 +12,9 @@ interface TrashNote {
 }
 
 export function explainNotesError(message: string): string {
+  if (/notes_one_home/i.test(message)) {
+    return "Book folders need one more script. In Supabase, open the SQL Editor, paste the book notes folders script, and run it.";
+  }
   if (/deleted_at/i.test(message)) {
     return "Trash is not set up yet. In Supabase, open the SQL Editor, paste the trash script, and run it.";
   }

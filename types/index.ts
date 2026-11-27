@@ -131,6 +131,7 @@ export interface BookWord {
   word: string;
   definition: string;
   example: string;
+  pronunciation: string;
   created_at: string;
   updated_at: string;
 }
