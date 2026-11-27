@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import CoachChat from "@/components/summary/CoachChat";
 import { useInstallVisible } from "@/components/InstallPrompt";
 import { toDayKey } from "@/lib/dates";
@@ -13,12 +13,26 @@ export default function FloatingCoach() {
   const today = useSyncExternalStore(subscribe, toDayKey, () => "");
   const installVisible = useInstallVisible();
   const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && root.current?.contains(target)) return;
+      setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
   if (!today) return null;
 
   const lift = installVisible ? "16rem" : "5.25rem";
 
   return (
     <div
+      ref={root}
       className="fixed right-4 z-40 flex w-[min(22rem,calc(100vw-2rem))] flex-col items-end gap-3"
       style={{ bottom: `calc(${lift} + env(safe-area-inset-bottom))` }}
     >

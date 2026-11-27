@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { explainNotesError } from "@/lib/notes";
+import { useInstallVisible } from "@/components/InstallPrompt";
 
 interface FolderChoice {
   id: string;
@@ -34,7 +35,8 @@ export default function NoteEditor({
   const ready = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ title: "", body: "" });
-  const [marks, setMarks] = useState({ bold: false, italic: false });
+  const [marks, setMarks] = useState({ bold: false, italic: false, heading: false, bullets: false, numbers: false });
+  const installVisible = useInstallVisible();
   const [home, setHome] = useState(folderId ?? "");
 
   useEffect(() => {
@@ -84,12 +86,16 @@ export default function NoteEditor({
       const selection = document.getSelection();
       if (!page || !selection?.anchorNode || !page.contains(selection.anchorNode)) return;
       try {
+        const block = document.queryCommandValue("formatBlock");
         setMarks({
           bold: document.queryCommandState("bold"),
           italic: document.queryCommandState("italic"),
+          heading: /h2/i.test(block),
+          bullets: document.queryCommandState("insertUnorderedList"),
+          numbers: document.queryCommandState("insertOrderedList"),
         });
       } catch {
-        setMarks({ bold: false, italic: false });
+        setMarks({ bold: false, italic: false, heading: false, bullets: false, numbers: false });
       }
     }
     document.addEventListener("selectionchange", sync);
@@ -177,7 +183,7 @@ export default function NoteEditor({
         </button>
         <p className="text-sm text-muted">{status}</p>
       </div>
-      <section className="rounded-3xl bg-[#fffdf8] px-5 py-6 text-slate-900 shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
+      <section className="rounded-3xl bg-[#fffdf8] px-5 pb-28 pt-6 text-slate-900 shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
         {context ? <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{context}</p> : null}
         <label className="sr-only" htmlFor="note-title">
           Title
@@ -194,24 +200,7 @@ export default function NoteEditor({
           placeholder="Title"
           className="mt-1 w-full bg-transparent text-2xl font-semibold outline-none placeholder:text-slate-400"
         />
-        <div className="sticky top-0 z-10 -mx-5 mt-4 flex gap-1 border-y border-slate-200 bg-[#fffdf8] px-3 py-2">
-          <ToolButton label="Heading" pressed={false} onPress={heading}>
-            H
-          </ToolButton>
-          <ToolButton label="Bold" pressed={marks.bold} onPress={() => apply("bold")}>
-            <span className="font-bold">B</span>
-          </ToolButton>
-          <ToolButton label="Italic" pressed={marks.italic} onPress={() => apply("italic")}>
-            <span className="italic">I</span>
-          </ToolButton>
-          <ToolButton label="Bullet list" pressed={false} onPress={() => apply("insertUnorderedList")}>
-            •
-          </ToolButton>
-          <ToolButton label="Numbered list" pressed={false} onPress={() => apply("insertOrderedList")}>
-            1.
-          </ToolButton>
-        </div>
-        <div className="relative mt-3">
+        <div className="relative mt-4">
           {visibleText(body).length === 0 ? (
             <span className="pointer-events-none absolute text-lg text-slate-400">Write here</span>
           ) : null}
@@ -227,6 +216,29 @@ export default function NoteEditor({
           />
         </div>
       </section>
+      <div
+        className="fixed inset-x-0 z-30 mx-auto flex max-w-xl px-4"
+        style={{ bottom: `calc(${installVisible ? "16rem" : "5.25rem"} + env(safe-area-inset-bottom))` }}
+      >
+        <div className="mr-16 flex w-full items-stretch rounded-2xl border border-slate-200 bg-white/95 p-1 shadow-[0_10px_30px_rgba(15,23,42,0.18)] backdrop-blur">
+          <ToolButton label="Heading" pressed={marks.heading} onPress={heading}>
+            <HeadingIcon />
+          </ToolButton>
+          <ToolButton label="Bold" pressed={marks.bold} onPress={() => apply("bold")}>
+            <BoldIcon />
+          </ToolButton>
+          <ToolButton label="Italic" pressed={marks.italic} onPress={() => apply("italic")}>
+            <ItalicIcon />
+          </ToolButton>
+          <span className="mx-1 my-2 w-px bg-slate-200" aria-hidden />
+          <ToolButton label="Bullet list" pressed={marks.bullets} onPress={() => apply("insertUnorderedList")}>
+            <BulletIcon />
+          </ToolButton>
+          <ToolButton label="Numbered list" pressed={marks.numbers} onPress={() => apply("insertOrderedList")}>
+            <NumberIcon />
+          </ToolButton>
+        </div>
+      </div>
       {folders ? (
         <label className="mt-4 block text-sm font-medium">
           Folder
@@ -283,12 +295,55 @@ function ToolButton({
       aria-pressed={pressed}
       onPointerDown={(event) => event.preventDefault()}
       onClick={onPress}
-      className={`flex h-11 min-w-11 items-center justify-center rounded-xl px-3 text-base text-slate-800 ${
-        pressed ? "bg-slate-200" : "bg-transparent"
+      className={`flex h-12 flex-1 items-center justify-center rounded-xl ${
+        pressed ? "bg-slate-900 text-white" : "text-slate-700"
       }`}
     >
       {children}
     </button>
+  );
+}
+
+function HeadingIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M6 5v14M18 5v14M6 12h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function BoldIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M7 5h6.5a3.5 3.5 0 0 1 0 7H7V5Zm0 7h7.5a3.5 3.5 0 0 1 0 7H7v-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ItalicIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M14 5h5M5 19h5M15 5 9 19" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function BulletIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M10 7h9M10 12h9M10 17h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="6" cy="7" r="1.2" fill="currentColor" />
+      <circle cx="6" cy="12" r="1.2" fill="currentColor" />
+      <circle cx="6" cy="17" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function NumberIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M11 7h8M11 12h8M11 17h8M6 6.5v3M5 17.5c.4.8 1.2 1.2 2 .8.6-.3.8-.8.5-1.3-.4-.6-1.4-.6-1.8 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
   );
 }
 
