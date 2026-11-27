@@ -7,6 +7,7 @@ import EmptyState from "@/components/EmptyState";
 import SetupNotice from "@/components/SetupNotice";
 import { createClient } from "@/lib/supabase/client";
 import GoalBoard from "@/components/goals/GoalBoard";
+import BookNotes from "@/components/notes/BookNotes";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { formatLongDate, parseDayKey, toDayKey } from "@/lib/dates";
 import {
@@ -205,6 +206,7 @@ function BooksScreen() {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [notesBook, setNotesBook] = useState<Book | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -327,6 +329,15 @@ function BooksScreen() {
     (book) => book.status === "finished" && !yearFinished.some((item) => item.id === book.id),
   );
 
+  if (notesBook) {
+    return (
+      <>
+        <PageHeader title={notesBook.title} subtitle="Notes on this book" />
+        <BookNotes bookId={notesBook.id} onBack={() => setNotesBook(null)} />
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader title="Books" subtitle={`${yearFinished.length} finished this year`} />
@@ -382,6 +393,7 @@ function BooksScreen() {
                 onSave={(draft) => saveDraft(draft, book)}
                 onUpdatePage={(page) => updatePage(book, page)}
                 onLog={(day, pages) => logSession(book, day, pages)}
+                onNotes={() => setNotesBook(book)}
               />
             )}
           </BookGroup>
@@ -420,6 +432,7 @@ function BooksScreen() {
                 onCancelDelete={() => setConfirmingId(null)}
                 onDelete={() => removeBook(book)}
                 onSave={(draft) => saveDraft(draft, book)}
+                onNotes={() => setNotesBook(book)}
               />
             )}
           </BookGroup>
@@ -437,6 +450,7 @@ function BooksScreen() {
                   onCancelDelete={() => setConfirmingId(null)}
                   onDelete={() => removeBook(book)}
                   onSave={(draft) => saveDraft(draft, book)}
+                  onNotes={() => setNotesBook(book)}
                 />
               )}
             </BookGroup>
@@ -685,6 +699,7 @@ function ReadingCard({
   onSave,
   onUpdatePage,
   onLog,
+  onNotes,
 }: {
   book: Book;
   sessions: ReadingSession[];
@@ -699,6 +714,7 @@ function ReadingCard({
   onSave: (draft: BookDraft) => Promise<void>;
   onUpdatePage: (page: number) => Promise<void>;
   onLog: (day: string, pages: number) => Promise<void>;
+  onNotes: () => void;
 }) {
   const [page, setPage] = useState(String(book.current_page));
   const [logDay, setLogDay] = useState(today);
@@ -719,13 +735,13 @@ function ReadingCard({
         <>
           <div className="flex gap-3">
             <Cover book={book} />
-            <div className="min-w-0 flex-1">
+            <button type="button" onClick={onNotes} className="min-w-0 flex-1 text-left">
               <h3 className="font-semibold">{book.title}</h3>
               {book.author ? <p className="text-sm text-muted">{book.author}</p> : null}
               <p className="mt-1 text-sm">
                 {left} pages left · {percent}%
               </p>
-            </div>
+            </button>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-background">
             <div className="h-full bg-accent" style={{ width: `${percent}%` }} />
@@ -806,6 +822,9 @@ function ReadingCard({
             <p className="text-sm text-muted">Logging pages also moves your bookmark forward.</p>
           )}
           {cardError ? <p className="text-sm text-red-600 dark:text-red-400">{cardError}</p> : null}
+          <button type="button" onClick={onNotes} className="min-h-12 w-full rounded-xl bg-background text-sm font-semibold">
+            Notes
+          </button>
           <CardActions
             editing={editing}
             confirming={confirming}
@@ -832,6 +851,7 @@ function SimpleCard({
   onCancelDelete,
   onDelete,
   onSave,
+  onNotes,
   startReading,
 }: {
   book: Book;
@@ -844,6 +864,7 @@ function SimpleCard({
   onCancelDelete: () => void;
   onDelete: () => Promise<void>;
   onSave: (draft: BookDraft) => Promise<void>;
+  onNotes?: () => void;
   startReading?: () => Promise<void>;
 }) {
   const [cardError, setCardError] = useState<string | null>(null);
@@ -855,17 +876,33 @@ function SimpleCard({
         <>
           <div className="flex gap-3">
             <Cover book={book} />
-            <div className="min-w-0 flex-1">
-              <h3 className="font-semibold">{book.title}</h3>
-              {book.author ? <p className="text-sm text-muted">{book.author}</p> : null}
-              <p className="mt-1 text-sm text-muted">
-                {bookStatusLabel(book.status)} · {book.total_pages} pages
-                {book.finished_at ? ` · finished ${formatLongDate(book.finished_at)}` : ""}
-              </p>
-            </div>
+            {onNotes ? (
+              <button type="button" onClick={onNotes} className="min-w-0 flex-1 text-left">
+                <h3 className="font-semibold">{book.title}</h3>
+                {book.author ? <p className="text-sm text-muted">{book.author}</p> : null}
+                <p className="mt-1 text-sm text-muted">
+                  {bookStatusLabel(book.status)} · {book.total_pages} pages
+                  {book.finished_at ? ` · finished ${formatLongDate(book.finished_at)}` : ""}
+                </p>
+              </button>
+            ) : (
+              <div className="min-w-0 flex-1">
+                <h3 className="font-semibold">{book.title}</h3>
+                {book.author ? <p className="text-sm text-muted">{book.author}</p> : null}
+                <p className="mt-1 text-sm text-muted">
+                  {bookStatusLabel(book.status)} · {book.total_pages} pages
+                  {book.finished_at ? ` · finished ${formatLongDate(book.finished_at)}` : ""}
+                </p>
+              </div>
+            )}
           </div>
           {cardError ? <p className="text-sm text-red-600 dark:text-red-400">{cardError}</p> : null}
           <div className="flex flex-wrap items-center gap-3">
+            {onNotes ? (
+              <button type="button" onClick={onNotes} className="min-h-11 text-sm font-medium text-accent">
+                Notes
+              </button>
+            ) : null}
             {startReading ? (
               <button
                 type="button"
